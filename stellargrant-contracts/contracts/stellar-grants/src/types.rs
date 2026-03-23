@@ -1,6 +1,7 @@
-use soroban_sdk::Error;
+use soroban_sdk::{contracterror, contracttype, Address, Map, Vec};
 
 /// Contract error types
+#[contracterror]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum ContractError {
@@ -10,22 +11,33 @@ pub enum ContractError {
     QuorumNotReached = 4,
     DeadlinePassed = 5,
     InvalidInput = 6,
+    MilestoneNotSubmitted = 7,
+    AlreadyVoted = 8,
 }
 
-impl From<ContractError> for Error {
-    fn from(err: ContractError) -> Self {
-        Error::from_contract_error(err as u32)
-    }
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum MilestoneState {
+    Pending = 0,
+    Submitted = 1,
+    Approved = 2,
+    Rejected = 3,
 }
 
-impl From<&ContractError> for Error {
-    fn from(err: &ContractError) -> Self {
-        Error::from_contract_error(*err as u32)
-    }
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Milestone {
+    pub state: MilestoneState,
+    pub votes: Map<Address, bool>,
+    pub approvals: u32,
+    pub rejections: u32,
 }
 
-impl From<Error> for ContractError {
-    fn from(_err: Error) -> Self {
-        ContractError::InvalidInput
-    }
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Grant {
+    pub id: u64,
+    pub reviewers: Vec<Address>,
+    pub total_milestones: u32,
 }

@@ -1,21 +1,39 @@
-use soroban_sdk::{Env, IntoVal, Symbol, Val};
+use crate::types::{Grant, Milestone};
+use soroban_sdk::{contracttype, Env};
 
-/// Storage key helpers for the Stellar Grants contract
+#[contracttype]
+pub enum DataKey {
+    Grant(u64),
+    Milestone(u64, u32),
+    GrantCounter,
+}
+
 pub struct Storage;
 
 impl Storage {
-    /// Get the storage key for a grant
-    pub fn grant_key(env: &Env, _grant_id: u64) -> Val {
-        Symbol::new(env, "grant").into_val(env)
+    pub fn get_grant(env: &Env, grant_id: u64) -> Option<Grant> {
+        env.storage().persistent().get(&DataKey::Grant(grant_id))
     }
 
-    /// Get the storage key for a milestone
-    pub fn milestone_key(env: &Env, _grant_id: u64, _milestone_idx: u32) -> Val {
-        Symbol::new(env, "milestone").into_val(env)
+    pub fn set_grant(env: &Env, grant_id: u64, grant: &Grant) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Grant(grant_id), grant);
     }
 
-    /// Get the storage key for grant counter
-    pub fn grant_counter_key(env: &Env) -> Val {
-        Symbol::new(env, "grant_counter").into_val(env)
+    pub fn get_milestone(env: &Env, grant_id: u64, milestone_idx: u32) -> Option<Milestone> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Milestone(grant_id, milestone_idx))
+    }
+
+    pub fn set_milestone(env: &Env, grant_id: u64, milestone_idx: u32, milestone: &Milestone) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Milestone(grant_id, milestone_idx), milestone);
+    }
+
+    pub fn has_grant(env: &Env, grant_id: u64) -> bool {
+        env.storage().persistent().has(&DataKey::Grant(grant_id))
     }
 }
