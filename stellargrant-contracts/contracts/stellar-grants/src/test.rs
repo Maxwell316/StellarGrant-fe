@@ -65,7 +65,9 @@ mod tests {
             env.storage()
                 .persistent()
                 .set(&from_key, &(from_balance - amount));
-            env.storage().persistent().set(&to_key, &(to_balance + amount));
+            env.storage()
+                .persistent()
+                .set(&to_key, &(to_balance + amount));
 
             let already_entered = env
                 .storage()
