@@ -1,4 +1,4 @@
-use crate::types::{Grant, Milestone};
+use crate::types::{EscrowLifecycleState, EscrowMode, EscrowState, Grant, Milestone};
 use soroban_sdk::{contracttype, Env};
 
 #[contracttype]
@@ -17,6 +17,9 @@ pub enum DataKey {
     IdentityOracle,
     ReviewerReputation(soroban_sdk::Address),
     GlobalAdmin,
+    EscrowState(u64),
+    MultisigSigners(u64),
+    ReleaseSignerApproval(u64, soroban_sdk::Address),
 }
 
 pub struct Storage;
@@ -134,5 +137,62 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&DataKey::ReviewerReputation(reviewer), &score);
+    }
+
+    pub fn get_escrow_state(env: &Env, grant_id: u64) -> EscrowState {
+        env.storage()
+            .persistent()
+            .get(&DataKey::EscrowState(grant_id))
+            .unwrap_or(EscrowState {
+                mode: EscrowMode::Standard,
+                lifecycle: EscrowLifecycleState::Funding,
+                quorum_ready: false,
+                approvals_count: 0,
+            })
+    }
+
+    pub fn set_escrow_state(env: &Env, grant_id: u64, state: &EscrowState) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowState(grant_id), state);
+    }
+
+    pub fn get_multisig_signers(
+        env: &Env,
+        grant_id: u64,
+    ) -> soroban_sdk::Vec<soroban_sdk::Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MultisigSigners(grant_id))
+            .unwrap_or(soroban_sdk::Vec::new(env))
+    }
+
+    pub fn set_multisig_signers(
+        env: &Env,
+        grant_id: u64,
+        signers: &soroban_sdk::Vec<soroban_sdk::Address>,
+    ) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultisigSigners(grant_id), signers);
+    }
+
+    pub fn has_release_approval(env: &Env, grant_id: u64, signer: &soroban_sdk::Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ReleaseSignerApproval(grant_id, signer.clone()))
+            .unwrap_or(false)
+    }
+
+    pub fn set_release_approval(
+        env: &Env,
+        grant_id: u64,
+        signer: &soroban_sdk::Address,
+        approved: bool,
+    ) {
+        env.storage().persistent().set(
+            &DataKey::ReleaseSignerApproval(grant_id, signer.clone()),
+            &approved,
+        );
     }
 }

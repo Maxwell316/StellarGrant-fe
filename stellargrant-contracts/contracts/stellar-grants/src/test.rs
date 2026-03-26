@@ -683,12 +683,15 @@ mod tests {
         let env = Env::default();
         env.mock_all_auths();
 
-        let (client, _, contract_id) = setup_test(&env);
+        let (client, admin, contract_id) = setup_test(&env);
         let owner = Address::generate(&env);
-        let token_id = Address::generate(&env); // don't need real token if 0 refund
+        let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = token_contract.address();
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
         let grant_id = 1u64;
 
         let total_funded = 500i128; // milestone 1=500 -> remaining=0
+        token_admin.mint(&contract_id, &total_funded);
 
         let grant = Grant {
             id: grant_id,
@@ -734,6 +737,166 @@ mod tests {
             assert_eq!(updated_grant.status, GrantStatus::Completed);
             assert_eq!(updated_grant.escrow_balance, 0);
         });
+    }
+
+    #[test]
+    fn test_high_security_grant_complete_waits_for_multisig() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, admin, contract_id) = setup_test(&env);
+        let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = token_contract.address();
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+
+        let owner = Address::generate(&env);
+        let signer1 = Address::generate(&env);
+        let signer2 = Address::generate(&env);
+        let reviewers = Vec::new(&env);
+        let mut multisig = Vec::new(&env);
+        multisig.push_back(signer1.clone());
+        multisig.push_back(signer2.clone());
+
+        let grant_id = client.grant_create_high_security(
+            &owner,
+            &String::from_str(&env, "HS"),
+            &String::from_str(&env, "Desc"),
+            &token_id,
+            &1000,
+            &500,
+            &2,
+            &reviewers,
+            &multisig,
+        );
+
+        let funder = Address::generate(&env);
+        token_admin.mint(&funder, &1000);
+        client.grant_fund(&grant_id, &funder, &1000);
+
+        env.as_contract(&contract_id, || {
+            for i in 0..2 {
+                let milestone = Milestone {
+                    idx: i,
+                    description: String::from_str(&env, "Desc"),
+                    amount: 500,
+                    state: MilestoneState::Approved,
+                    votes: Map::new(&env),
+                    approvals: 1,
+                    rejections: 0,
+                    reasons: Map::new(&env),
+                    status_updated_at: 0,
+                    proof_url: None,
+                    submission_timestamp: 0,
+                };
+                Storage::set_milestone(&env, grant_id, i, &milestone);
+            }
+        });
+
+        client.grant_complete(&grant_id);
+
+        let token_client = token::Client::new(&env, &token_id);
+        assert_eq!(token_client.balance(&owner), 0);
+        env.as_contract(&contract_id, || {
+            let grant = Storage::get_grant(&env, grant_id).unwrap();
+            assert_eq!(grant.status, GrantStatus::Active);
+            assert_eq!(grant.escrow_balance, 1000);
+        });
+    }
+
+    #[test]
+    fn test_high_security_release_on_final_signature() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, admin, contract_id) = setup_test(&env);
+        let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = token_contract.address();
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+
+        let owner = Address::generate(&env);
+        let signer1 = Address::generate(&env);
+        let signer2 = Address::generate(&env);
+        let reviewers = Vec::new(&env);
+        let mut multisig = Vec::new(&env);
+        multisig.push_back(signer1.clone());
+        multisig.push_back(signer2.clone());
+
+        let grant_id = client.grant_create_high_security(
+            &owner,
+            &String::from_str(&env, "HS"),
+            &String::from_str(&env, "Desc"),
+            &token_id,
+            &1000,
+            &500,
+            &2,
+            &reviewers,
+            &multisig,
+        );
+
+        let funder = Address::generate(&env);
+        token_admin.mint(&funder, &1000);
+        client.grant_fund(&grant_id, &funder, &1000);
+        env.as_contract(&contract_id, || {
+            for i in 0..2 {
+                let milestone = Milestone {
+                    idx: i,
+                    description: String::from_str(&env, "Desc"),
+                    amount: 500,
+                    state: MilestoneState::Approved,
+                    votes: Map::new(&env),
+                    approvals: 1,
+                    rejections: 0,
+                    reasons: Map::new(&env),
+                    status_updated_at: 0,
+                    proof_url: None,
+                    submission_timestamp: 0,
+                };
+                Storage::set_milestone(&env, grant_id, i, &milestone);
+            }
+        });
+
+        client.grant_complete(&grant_id);
+        client.sign_release(&grant_id, &signer1);
+        let token_client = token::Client::new(&env, &token_id);
+        assert_eq!(token_client.balance(&owner), 0);
+
+        client.sign_release(&grant_id, &signer2);
+        assert_eq!(token_client.balance(&owner), 1000);
+        env.as_contract(&contract_id, || {
+            let grant = Storage::get_grant(&env, grant_id).unwrap();
+            assert_eq!(grant.status, GrantStatus::Completed);
+            assert_eq!(grant.escrow_balance, 0);
+        });
+    }
+
+    #[test]
+    fn test_high_security_rejects_non_multisig_signer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _, _) = setup_test(&env);
+        let owner = Address::generate(&env);
+        let signer = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let token = Address::generate(&env);
+        let reviewers = Vec::new(&env);
+        let mut multisig = Vec::new(&env);
+        multisig.push_back(signer);
+
+        let grant_id = client.grant_create_high_security(
+            &owner,
+            &String::from_str(&env, "HS"),
+            &String::from_str(&env, "Desc"),
+            &token,
+            &1000,
+            &500,
+            &1,
+            &reviewers,
+            &multisig,
+        );
+
+        let result = client.try_sign_release(&grant_id, &attacker);
+        assert_eq!(result, Err(Ok(ContractError::NotMultisigSigner.into())));
     }
 
     #[test]

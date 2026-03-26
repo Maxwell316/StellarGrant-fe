@@ -7,7 +7,10 @@ mod types;
 
 pub use events::Events;
 pub use storage::Storage;
-pub use types::{ContractError, Grant, GrantFund, GrantStatus, Milestone, MilestoneState};
+pub use types::{
+    ContractError, EscrowLifecycleState, EscrowMode, EscrowState, Grant, GrantFund, GrantStatus,
+    Milestone, MilestoneState,
+};
 
 use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
 
@@ -102,8 +105,63 @@ impl StellarGrantsContract {
         };
 
         Storage::set_grant(&env, grant_id, &grant);
+        Storage::set_escrow_state(
+            &env,
+            grant_id,
+            &EscrowState {
+                mode: EscrowMode::Standard,
+                lifecycle: EscrowLifecycleState::Funding,
+                quorum_ready: false,
+                approvals_count: 0,
+            },
+        );
+        Storage::set_multisig_signers(&env, grant_id, &soroban_sdk::Vec::new(&env));
 
         Events::emit_grant_created(&env, grant_id, owner, title, total_amount);
+
+        Ok(grant_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn grant_create_high_security(
+        env: Env,
+        owner: Address,
+        title: String,
+        description: String,
+        token: Address,
+        total_amount: i128,
+        milestone_amount: i128,
+        num_milestones: u32,
+        reviewers: soroban_sdk::Vec<Address>,
+        multisig_signers: soroban_sdk::Vec<Address>,
+    ) -> Result<u64, ContractError> {
+        if multisig_signers.is_empty() {
+            return Err(ContractError::InvalidInput);
+        }
+
+        let grant_id = Self::grant_create(
+            env.clone(),
+            owner,
+            title,
+            description,
+            token,
+            total_amount,
+            milestone_amount,
+            num_milestones,
+            reviewers,
+        )?;
+
+        Storage::set_escrow_state(
+            &env,
+            grant_id,
+            &EscrowState {
+                mode: EscrowMode::HighSecurity,
+                lifecycle: EscrowLifecycleState::Funding,
+                quorum_ready: false,
+                approvals_count: 0,
+            },
+        );
+        Storage::set_multisig_signers(&env, grant_id, &multisig_signers);
 
         Ok(grant_id)
     }
@@ -250,82 +308,171 @@ impl StellarGrantsContract {
     /// Mark a grant as completed when all milestones are approved and refund the remaining balance
     pub fn grant_complete(env: Env, grant_id: u64) -> Result<(), ContractError> {
         reentrancy::with_non_reentrant(&env, || {
-            let mut grant =
-                Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
             if grant.status != GrantStatus::Active {
                 return Err(ContractError::InvalidState);
             }
 
-            // Verify all milestones are approved and calculate total paid
-            let mut total_paid: i128 = 0;
-            let mut approved_count = 0;
+            let mut escrow_state = Storage::get_escrow_state(&env, grant_id);
+            if escrow_state.lifecycle == EscrowLifecycleState::Released {
+                return Err(ContractError::GrantAlreadyReleased);
+            }
 
-            for milestone_idx in 0..grant.total_milestones {
-                if let Some(milestone) = Storage::get_milestone(&env, grant_id, milestone_idx) {
-                    if milestone.state != MilestoneState::Approved {
-                        return Err(ContractError::NotAllMilestonesApproved);
-                    }
-                    total_paid += milestone.amount;
-                    approved_count += 1;
-                } else {
+            // Quorum is interpreted as all milestones approved in current contract design.
+            let _ =
+                Self::compute_total_paid_if_quorum_ready(&env, grant_id, grant.total_milestones)?;
+            escrow_state.quorum_ready = true;
+
+            if escrow_state.mode == EscrowMode::Standard {
+                Self::finalize_grant_release(&env, grant_id)?;
+                return Ok(());
+            }
+
+            // High-security grants remain locked until every multisig signer calls sign_release.
+            escrow_state.lifecycle = EscrowLifecycleState::AwaitingMultisig;
+            Storage::set_escrow_state(&env, grant_id, &escrow_state);
+            Ok(())
+        })
+    }
+
+    pub fn sign_release(env: Env, grant_id: u64, signer: Address) -> Result<(), ContractError> {
+        signer.require_auth();
+        reentrancy::with_non_reentrant(&env, || {
+            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+            if grant.status != GrantStatus::Active {
+                return Err(ContractError::InvalidState);
+            }
+
+            let mut escrow_state = Storage::get_escrow_state(&env, grant_id);
+            if escrow_state.mode != EscrowMode::HighSecurity {
+                return Err(ContractError::InvalidState);
+            }
+            if escrow_state.lifecycle == EscrowLifecycleState::Released {
+                return Err(ContractError::GrantAlreadyReleased);
+            }
+
+            let signers = Storage::get_multisig_signers(&env, grant_id);
+            if !signers.contains(signer.clone()) {
+                return Err(ContractError::NotMultisigSigner);
+            }
+            if Storage::has_release_approval(&env, grant_id, &signer) {
+                return Err(ContractError::AlreadySignedRelease);
+            }
+
+            Storage::set_release_approval(&env, grant_id, &signer, true);
+            escrow_state.approvals_count += 1;
+            Storage::set_escrow_state(&env, grant_id, &escrow_state);
+
+            let approvals_complete = escrow_state.approvals_count >= signers.len();
+            if approvals_complete && escrow_state.quorum_ready {
+                Self::finalize_grant_release(&env, grant_id)?;
+            } else if approvals_complete {
+                escrow_state.lifecycle = EscrowLifecycleState::AwaitingMultisig;
+                Storage::set_escrow_state(&env, grant_id, &escrow_state);
+            }
+
+            Ok(())
+        })
+    }
+
+    fn compute_total_paid_if_quorum_ready(
+        env: &Env,
+        grant_id: u64,
+        total_milestones: u32,
+    ) -> Result<i128, ContractError> {
+        let mut total_paid: i128 = 0;
+        let mut approved_count = 0;
+        for milestone_idx in 0..total_milestones {
+            if let Some(milestone) = Storage::get_milestone(env, grant_id, milestone_idx) {
+                if milestone.state != MilestoneState::Approved {
                     return Err(ContractError::NotAllMilestonesApproved);
                 }
-            }
-
-            if approved_count != grant.total_milestones {
+                total_paid += milestone.amount;
+                approved_count += 1;
+            } else {
                 return Err(ContractError::NotAllMilestonesApproved);
             }
+        }
+        if approved_count != total_milestones {
+            return Err(ContractError::NotAllMilestonesApproved);
+        }
+        Ok(total_paid)
+    }
 
-            // Calculate remaining balance refunds
-            let remaining_balance = grant.escrow_balance - total_paid;
+    fn finalize_grant_release(env: &Env, grant_id: u64) -> Result<(), ContractError> {
+        let mut grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if grant.status != GrantStatus::Active {
+            return Err(ContractError::InvalidState);
+        }
 
-            if remaining_balance > 0 {
-                let mut total_contributions: i128 = 0;
-                for fund_entry in grant.funders.iter() {
-                    total_contributions += fund_entry.amount;
-                }
+        let total_paid =
+            Self::compute_total_paid_if_quorum_ready(env, grant_id, grant.total_milestones)?;
+        if grant.escrow_balance < total_paid {
+            return Err(ContractError::InvalidInput);
+        }
+        let remaining_balance = grant.escrow_balance - total_paid;
+        let token_client = token::Client::new(env, &grant.token);
 
-                if total_contributions > 0 {
-                    let token_client = token::Client::new(&env, &grant.token);
+        if total_paid > 0 {
+            token_client.transfer(&env.current_contract_address(), &grant.owner, &total_paid);
+        }
 
-                    for fund_entry in grant.funders.iter() {
-                        let refund_amount = fund_entry
+        if remaining_balance > 0 {
+            let mut total_contributions: i128 = 0;
+            for fund_entry in grant.funders.iter() {
+                total_contributions += fund_entry.amount;
+            }
+
+            if total_contributions > 0 {
+                let funders_len = grant.funders.len();
+                let mut distributed = 0i128;
+                for i in 0..funders_len {
+                    let fund_entry = grant.funders.get(i).unwrap();
+                    let is_last = i + 1 == funders_len;
+                    let refund_amount = if is_last {
+                        remaining_balance - distributed
+                    } else {
+                        let amount = fund_entry
                             .amount
                             .checked_mul(remaining_balance)
                             .ok_or(ContractError::InvalidInput)?
                             .checked_div(total_contributions)
                             .ok_or(ContractError::InvalidInput)?;
+                        distributed += amount;
+                        amount
+                    };
 
-                        if refund_amount > 0 {
-                            token_client.transfer(
-                                &env.current_contract_address(),
-                                &fund_entry.funder,
-                                &refund_amount,
-                            );
-                            Events::emit_final_refund(
-                                &env,
-                                grant_id,
-                                fund_entry.funder.clone(),
-                                refund_amount,
-                            );
-                        }
+                    if refund_amount > 0 {
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &fund_entry.funder,
+                            &refund_amount,
+                        );
+                        Events::emit_final_refund(
+                            env,
+                            grant_id,
+                            fund_entry.funder.clone(),
+                            refund_amount,
+                        );
                     }
                 }
             }
+        }
 
-            // Update state
-            grant.status = GrantStatus::Completed;
-            grant.escrow_balance = 0;
-            grant.timestamp = env.ledger().timestamp();
+        grant.status = GrantStatus::Completed;
+        grant.escrow_balance = 0;
+        grant.milestones_paid_out = grant.total_milestones;
+        grant.timestamp = env.ledger().timestamp();
+        Storage::set_grant(env, grant_id, &grant);
 
-            Storage::set_grant(&env, grant_id, &grant);
+        let mut escrow_state = Storage::get_escrow_state(env, grant_id);
+        escrow_state.lifecycle = EscrowLifecycleState::Released;
+        escrow_state.quorum_ready = true;
+        Storage::set_escrow_state(env, grant_id, &escrow_state);
 
-            // Emit completion event
-            Events::emit_grant_completed(&env, grant_id, total_paid, remaining_balance);
-
-            Ok(())
-        })
+        Events::emit_grant_completed(env, grant_id, total_paid, remaining_balance);
+        Ok(())
     }
 
     /// Allows authorized reviewers to vote on submitted milestones.

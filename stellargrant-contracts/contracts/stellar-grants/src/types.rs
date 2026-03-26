@@ -25,6 +25,36 @@ pub enum ContractError {
     BatchEmpty = 18,
     BatchTooLarge = 19,
     ReentrancyDetected = 20,
+    NotMultisigSigner = 21,
+    AlreadySignedRelease = 22,
+    ReleaseNotReady = 23,
+    GrantAlreadyReleased = 24,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum EscrowMode {
+    Standard = 1,
+    HighSecurity = 2,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum EscrowLifecycleState {
+    Funding = 1,
+    AwaitingMultisig = 2,
+    Released = 3,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EscrowState {
+    pub mode: EscrowMode,
+    pub lifecycle: EscrowLifecycleState,
+    pub quorum_ready: bool,
+    pub approvals_count: u32,
 }
 
 #[contracttype]
