@@ -24,6 +24,7 @@ pub enum ContractError {
     NotVerified = 17,
     BatchEmpty = 18,
     BatchTooLarge = 19,
+    ReentrancyDetected = 20,
 }
 
 #[contracttype]

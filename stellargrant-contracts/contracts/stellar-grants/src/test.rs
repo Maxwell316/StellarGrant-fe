@@ -4,7 +4,104 @@ mod tests {
     use crate::types::{ContractError, Grant, GrantFund, GrantStatus, Milestone, MilestoneState};
     use crate::StellarGrantsContract;
     use crate::StellarGrantsContractClient;
-    use soroban_sdk::{testutils::Address as _, token, Address, Env, Map, String, Vec};
+    use soroban_sdk::{
+        contract, contractimpl, contracttype, testutils::Address as _, token, Address, Env, Map,
+        String, Vec,
+    };
+
+    #[contracttype]
+    #[derive(Clone)]
+    enum ReentrantTokenDataKey {
+        Balance(Address),
+        GrantsContract,
+        ReenterGrantId,
+        ReenterFunder,
+        HookEntered,
+    }
+
+    #[contract]
+    struct ReentrantToken;
+
+    #[contractimpl]
+    impl ReentrantToken {
+        pub fn initialize(
+            env: Env,
+            grants_contract: Address,
+            grant_id: u64,
+            reenter_funder: Address,
+        ) {
+            env.storage()
+                .persistent()
+                .set(&ReentrantTokenDataKey::GrantsContract, &grants_contract);
+            env.storage()
+                .persistent()
+                .set(&ReentrantTokenDataKey::ReenterGrantId, &grant_id);
+            env.storage()
+                .persistent()
+                .set(&ReentrantTokenDataKey::ReenterFunder, &reenter_funder);
+            env.storage()
+                .temporary()
+                .set(&ReentrantTokenDataKey::HookEntered, &false);
+        }
+
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let key = ReentrantTokenDataKey::Balance(to);
+            let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(current + amount));
+        }
+
+        pub fn balance(env: Env, owner: Address) -> i128 {
+            env.storage()
+                .persistent()
+                .get(&ReentrantTokenDataKey::Balance(owner))
+                .unwrap_or(0)
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            let from_key = ReentrantTokenDataKey::Balance(from.clone());
+            let to_key = ReentrantTokenDataKey::Balance(to);
+            let from_balance: i128 = env.storage().persistent().get(&from_key).unwrap_or(0);
+            let to_balance: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&from_key, &(from_balance - amount));
+            env.storage()
+                .persistent()
+                .set(&to_key, &(to_balance + amount));
+
+            let already_entered = env
+                .storage()
+                .temporary()
+                .get(&ReentrantTokenDataKey::HookEntered)
+                .unwrap_or(false);
+            if already_entered {
+                return;
+            }
+
+            env.storage()
+                .temporary()
+                .set(&ReentrantTokenDataKey::HookEntered, &true);
+
+            let grants_contract: Address = env
+                .storage()
+                .persistent()
+                .get(&ReentrantTokenDataKey::GrantsContract)
+                .unwrap();
+            let grant_id: u64 = env
+                .storage()
+                .persistent()
+                .get(&ReentrantTokenDataKey::ReenterGrantId)
+                .unwrap();
+            let reenter_funder: Address = env
+                .storage()
+                .persistent()
+                .get(&ReentrantTokenDataKey::ReenterFunder)
+                .unwrap();
+
+            let grants_client = StellarGrantsContractClient::new(&env, &grants_contract);
+            grants_client.grant_fund(&grant_id, &reenter_funder, &1);
+        }
+    }
 
     fn setup_test(
         env: &Env,
@@ -1067,6 +1164,47 @@ mod tests {
             assert_eq!(f.funder, funder);
             assert_eq!(f.amount, 500);
         });
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_grant_fund_reentrancy_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _, contract_id) = setup_test(&env);
+        let owner = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let grant_id = 77u64;
+
+        let token_contract = env.register(ReentrantToken, ());
+        let token_client = ReentrantTokenClient::new(&env, &token_contract);
+        token_client.initialize(&contract_id, &grant_id, &attacker);
+        token_client.mint(&attacker, &1000i128);
+
+        env.as_contract(&contract_id, || {
+            let grant = Grant {
+                id: grant_id,
+                title: String::from_str(&env, "Reentrancy Test"),
+                description: String::from_str(&env, "Desc"),
+                milestone_amount: 500,
+                owner,
+                token: token_contract.clone(),
+                status: GrantStatus::Active,
+                total_amount: 1000,
+                reviewers: Vec::new(&env),
+                total_milestones: 1,
+                milestones_paid_out: 0,
+                escrow_balance: 0,
+                funders: Vec::new(&env),
+                reason: None,
+                timestamp: env.ledger().timestamp(),
+            };
+            Storage::set_grant(&env, grant_id, &grant);
+        });
+
+        // Reentrant token callback attempts nested grant_fund call and must panic via lock.
+        client.grant_fund(&grant_id, &attacker, &100i128);
     }
 
     // -------------------------------------------------------------------------

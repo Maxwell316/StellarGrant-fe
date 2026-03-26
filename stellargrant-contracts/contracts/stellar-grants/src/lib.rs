@@ -1,6 +1,7 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 mod events;
+mod reentrancy;
 mod storage;
 mod types;
 
@@ -139,151 +140,156 @@ impl StellarGrantsContract {
         reason: String,
     ) -> Result<(), ContractError> {
         owner.require_auth();
+        reentrancy::with_non_reentrant(&env, || {
+            let mut grant =
+                Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
-        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-        if grant.owner != owner {
-            return Err(ContractError::Unauthorized);
-        }
-
-        if grant.status != GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
-
-        // Cannot cancel if all milestones are approved/paid out
-        if grant.milestones_paid_out >= grant.total_milestones {
-            return Err(ContractError::InvalidState);
-        }
-
-        let total_refundable = grant.escrow_balance;
-        if total_refundable <= 0 {
-            return Err(ContractError::NoRefundableAmount);
-        }
-
-        let mut total_contributions: i128 = 0;
-        for fund_entry in grant.funders.iter() {
-            total_contributions += fund_entry.amount;
-        }
-
-        if total_contributions <= 0 {
-            return Err(ContractError::NoRefundableAmount);
-        }
-
-        let token_client = token::Client::new(&env, &grant.token);
-
-        for fund_entry in grant.funders.iter() {
-            let refund_amount = fund_entry
-                .amount
-                .checked_mul(total_refundable)
-                .ok_or(ContractError::InvalidInput)?
-                .checked_div(total_contributions)
-                .ok_or(ContractError::InvalidInput)?;
-
-            if refund_amount > 0 {
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &fund_entry.funder,
-                    &refund_amount,
-                );
-                Events::emit_refund_executed(
-                    &env,
-                    grant_id,
-                    fund_entry.funder.clone(),
-                    refund_amount,
-                );
+            if grant.owner != owner {
+                return Err(ContractError::Unauthorized);
             }
-        }
 
-        // Update state
-        grant.status = GrantStatus::Cancelled;
-        grant.escrow_balance = 0;
-        grant.reason = Some(reason.clone());
-        grant.timestamp = env.ledger().timestamp();
-
-        Storage::set_grant(&env, grant_id, &grant);
-
-        // Emit cancellation event
-        Events::emit_grant_cancelled(&env, grant_id, owner, reason, total_refundable);
-
-        Ok(())
-    }
-
-    /// Mark a grant as completed when all milestones are approved and refund the remaining balance
-    pub fn grant_complete(env: Env, grant_id: u64) -> Result<(), ContractError> {
-        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-        if grant.status != GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
-
-        // Verify all milestones are approved and calculate total paid
-        let mut total_paid: i128 = 0;
-        let mut approved_count = 0;
-
-        for milestone_idx in 0..grant.total_milestones {
-            if let Some(milestone) = Storage::get_milestone(&env, grant_id, milestone_idx) {
-                if milestone.state != MilestoneState::Approved {
-                    return Err(ContractError::NotAllMilestonesApproved);
-                }
-                total_paid += milestone.amount;
-                approved_count += 1;
-            } else {
-                return Err(ContractError::NotAllMilestonesApproved);
+            if grant.status != GrantStatus::Active {
+                return Err(ContractError::InvalidState);
             }
-        }
 
-        if approved_count != grant.total_milestones {
-            return Err(ContractError::NotAllMilestonesApproved);
-        }
+            // Cannot cancel if all milestones are approved/paid out
+            if grant.milestones_paid_out >= grant.total_milestones {
+                return Err(ContractError::InvalidState);
+            }
 
-        // Calculate remaining balance refunds
-        let remaining_balance = grant.escrow_balance - total_paid;
+            let total_refundable = grant.escrow_balance;
+            if total_refundable <= 0 {
+                return Err(ContractError::NoRefundableAmount);
+            }
 
-        if remaining_balance > 0 {
             let mut total_contributions: i128 = 0;
             for fund_entry in grant.funders.iter() {
                 total_contributions += fund_entry.amount;
             }
 
-            if total_contributions > 0 {
-                let token_client = token::Client::new(&env, &grant.token);
+            if total_contributions <= 0 {
+                return Err(ContractError::NoRefundableAmount);
+            }
 
+            let token_client = token::Client::new(&env, &grant.token);
+
+            for fund_entry in grant.funders.iter() {
+                let refund_amount = fund_entry
+                    .amount
+                    .checked_mul(total_refundable)
+                    .ok_or(ContractError::InvalidInput)?
+                    .checked_div(total_contributions)
+                    .ok_or(ContractError::InvalidInput)?;
+
+                if refund_amount > 0 {
+                    token_client.transfer(
+                        &env.current_contract_address(),
+                        &fund_entry.funder,
+                        &refund_amount,
+                    );
+                    Events::emit_refund_executed(
+                        &env,
+                        grant_id,
+                        fund_entry.funder.clone(),
+                        refund_amount,
+                    );
+                }
+            }
+
+            // Update state
+            grant.status = GrantStatus::Cancelled;
+            grant.escrow_balance = 0;
+            grant.reason = Some(reason.clone());
+            grant.timestamp = env.ledger().timestamp();
+
+            Storage::set_grant(&env, grant_id, &grant);
+
+            // Emit cancellation event
+            Events::emit_grant_cancelled(&env, grant_id, owner, reason, total_refundable);
+
+            Ok(())
+        })
+    }
+
+    /// Mark a grant as completed when all milestones are approved and refund the remaining balance
+    pub fn grant_complete(env: Env, grant_id: u64) -> Result<(), ContractError> {
+        reentrancy::with_non_reentrant(&env, || {
+            let mut grant =
+                Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+
+            if grant.status != GrantStatus::Active {
+                return Err(ContractError::InvalidState);
+            }
+
+            // Verify all milestones are approved and calculate total paid
+            let mut total_paid: i128 = 0;
+            let mut approved_count = 0;
+
+            for milestone_idx in 0..grant.total_milestones {
+                if let Some(milestone) = Storage::get_milestone(&env, grant_id, milestone_idx) {
+                    if milestone.state != MilestoneState::Approved {
+                        return Err(ContractError::NotAllMilestonesApproved);
+                    }
+                    total_paid += milestone.amount;
+                    approved_count += 1;
+                } else {
+                    return Err(ContractError::NotAllMilestonesApproved);
+                }
+            }
+
+            if approved_count != grant.total_milestones {
+                return Err(ContractError::NotAllMilestonesApproved);
+            }
+
+            // Calculate remaining balance refunds
+            let remaining_balance = grant.escrow_balance - total_paid;
+
+            if remaining_balance > 0 {
+                let mut total_contributions: i128 = 0;
                 for fund_entry in grant.funders.iter() {
-                    let refund_amount = fund_entry
-                        .amount
-                        .checked_mul(remaining_balance)
-                        .ok_or(ContractError::InvalidInput)?
-                        .checked_div(total_contributions)
-                        .ok_or(ContractError::InvalidInput)?;
+                    total_contributions += fund_entry.amount;
+                }
 
-                    if refund_amount > 0 {
-                        token_client.transfer(
-                            &env.current_contract_address(),
-                            &fund_entry.funder,
-                            &refund_amount,
-                        );
-                        Events::emit_final_refund(
-                            &env,
-                            grant_id,
-                            fund_entry.funder.clone(),
-                            refund_amount,
-                        );
+                if total_contributions > 0 {
+                    let token_client = token::Client::new(&env, &grant.token);
+
+                    for fund_entry in grant.funders.iter() {
+                        let refund_amount = fund_entry
+                            .amount
+                            .checked_mul(remaining_balance)
+                            .ok_or(ContractError::InvalidInput)?
+                            .checked_div(total_contributions)
+                            .ok_or(ContractError::InvalidInput)?;
+
+                        if refund_amount > 0 {
+                            token_client.transfer(
+                                &env.current_contract_address(),
+                                &fund_entry.funder,
+                                &refund_amount,
+                            );
+                            Events::emit_final_refund(
+                                &env,
+                                grant_id,
+                                fund_entry.funder.clone(),
+                                refund_amount,
+                            );
+                        }
                     }
                 }
             }
-        }
 
-        // Update state
-        grant.status = GrantStatus::Completed;
-        grant.escrow_balance = 0;
-        grant.timestamp = env.ledger().timestamp();
+            // Update state
+            grant.status = GrantStatus::Completed;
+            grant.escrow_balance = 0;
+            grant.timestamp = env.ledger().timestamp();
 
-        Storage::set_grant(&env, grant_id, &grant);
+            Storage::set_grant(&env, grant_id, &grant);
 
-        // Emit completion event
-        Events::emit_grant_completed(&env, grant_id, total_paid, remaining_balance);
+            // Emit completion event
+            Events::emit_grant_completed(&env, grant_id, total_paid, remaining_balance);
 
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Allows authorized reviewers to vote on submitted milestones.
@@ -527,55 +533,57 @@ impl StellarGrantsContract {
         amount: i128,
     ) -> Result<(), ContractError> {
         funder.require_auth();
-
-        if amount <= 0 {
-            return Err(ContractError::InvalidInput);
-        }
-
-        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-        if grant.status != GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
-
-        // Perform the token transfer from the funder to the contract
-        let token_client = token::Client::new(&env, &grant.token);
-        let contract_address = env.current_contract_address();
-        token_client.transfer(&funder, &contract_address, &amount);
-
-        // Update escrow balance with overflow protection
-        grant.escrow_balance = grant
-            .escrow_balance
-            .checked_add(amount)
-            .ok_or(ContractError::InvalidInput)?;
-
-        // Update funds tracking
-        let mut funder_found = false;
-        for i in 0..grant.funders.len() {
-            let mut fund_entry = grant.funders.get(i).unwrap();
-            if fund_entry.funder == funder {
-                fund_entry.amount = fund_entry
-                    .amount
-                    .checked_add(amount)
-                    .ok_or(ContractError::InvalidInput)?;
-                grant.funders.set(i, fund_entry);
-                funder_found = true;
-                break;
+        reentrancy::with_non_reentrant(&env, || {
+            if amount <= 0 {
+                return Err(ContractError::InvalidInput);
             }
-        }
 
-        if !funder_found {
-            grant.funders.push_back(GrantFund {
-                funder: funder.clone(),
-                amount,
-            });
-        }
+            let mut grant =
+                Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
-        Storage::set_grant(&env, grant_id, &grant);
+            if grant.status != GrantStatus::Active {
+                return Err(ContractError::InvalidState);
+            }
 
-        Events::emit_grant_funded(&env, grant_id, funder, amount, grant.escrow_balance);
+            // Perform the token transfer from the funder to the contract
+            let token_client = token::Client::new(&env, &grant.token);
+            let contract_address = env.current_contract_address();
+            token_client.transfer(&funder, &contract_address, &amount);
 
-        Ok(())
+            // Update escrow balance with overflow protection
+            grant.escrow_balance = grant
+                .escrow_balance
+                .checked_add(amount)
+                .ok_or(ContractError::InvalidInput)?;
+
+            // Update funds tracking
+            let mut funder_found = false;
+            for i in 0..grant.funders.len() {
+                let mut fund_entry = grant.funders.get(i).unwrap();
+                if fund_entry.funder == funder {
+                    fund_entry.amount = fund_entry
+                        .amount
+                        .checked_add(amount)
+                        .ok_or(ContractError::InvalidInput)?;
+                    grant.funders.set(i, fund_entry);
+                    funder_found = true;
+                    break;
+                }
+            }
+
+            if !funder_found {
+                grant.funders.push_back(GrantFund {
+                    funder: funder.clone(),
+                    amount,
+                });
+            }
+
+            Storage::set_grant(&env, grant_id, &grant);
+
+            Events::emit_grant_funded(&env, grant_id, funder, amount, grant.escrow_balance);
+
+            Ok(())
+        })
     }
 
     /// Retrieve a grant by its ID
