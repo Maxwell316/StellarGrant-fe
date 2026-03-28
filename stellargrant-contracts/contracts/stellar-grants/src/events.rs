@@ -183,7 +183,35 @@ pub struct ContractUpgraded {
 
 pub struct Events;
 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuorumReached {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub milestone_idx: u32,
+    pub approvals: u32,
+    pub quorum: u32,
+    pub timestamp: u64,
+}
+
 impl Events {
+    pub fn emit_quorum_reached(
+        env: &Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        approvals: u32,
+        quorum: u32,
+    ) {
+        let event = QuorumReached {
+            event_version: EVENT_VERSION,
+            grant_id,
+            milestone_idx,
+            approvals,
+            quorum,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
     pub fn emit_contract_initialized(env: &Env, council: Address) {
         let event = ContractInitialized {
             event_version: EVENT_VERSION,
