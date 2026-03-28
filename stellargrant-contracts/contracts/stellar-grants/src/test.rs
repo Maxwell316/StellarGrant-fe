@@ -188,6 +188,7 @@ mod tests {
                 funders: Vec::new(env),
                 reason: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(env, grant_id, &grant);
@@ -481,6 +482,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -552,6 +554,7 @@ mod tests {
 
             cancellation_requested_at: None,
             timestamp: env.ledger().timestamp(),
+            last_heartbeat: env.ledger().timestamp(),
         };
 
         env.as_contract(&contract_id, || {
@@ -619,6 +622,7 @@ mod tests {
 
             cancellation_requested_at: None,
             timestamp: env.ledger().timestamp(),
+            last_heartbeat: env.ledger().timestamp(),
         };
 
         env.as_contract(&contract_id, || {
@@ -676,6 +680,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -717,6 +722,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -782,6 +788,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -846,6 +853,7 @@ mod tests {
 
             cancellation_requested_at: None,
             timestamp: env.ledger().timestamp(),
+            last_heartbeat: env.ledger().timestamp(),
         };
 
         env.as_contract(&contract_id, || {
@@ -929,6 +937,7 @@ mod tests {
 
             cancellation_requested_at: None,
             timestamp: 0,
+            last_heartbeat: 0,
         };
 
         env.as_contract(&contract_id, || {
@@ -1012,6 +1021,7 @@ mod tests {
 
             cancellation_requested_at: None,
             timestamp: 0,
+            last_heartbeat: 0,
         };
 
         env.as_contract(&contract_id, || {
@@ -1078,7 +1088,7 @@ mod tests {
 
         let funder = Address::generate(&env);
         token_admin.mint(&funder, &1000);
-        client.grant_fund(&grant_id, &funder, &1000);
+        client.grant_fund(&grant_id, &funder, &1000, &None);
 
         env.as_contract(&contract_id, || {
             for i in 0..2 {
@@ -1146,7 +1156,7 @@ mod tests {
 
         let funder = Address::generate(&env);
         token_admin.mint(&funder, &1000);
-        client.grant_fund(&grant_id, &funder, &1000);
+        client.grant_fund(&grant_id, &funder, &1000, &None);
         env.as_contract(&contract_id, || {
             for i in 0..2 {
                 let milestone = Milestone {
@@ -1244,6 +1254,7 @@ mod tests {
 
             cancellation_requested_at: None,
             timestamp: 0,
+            last_heartbeat: 0,
         };
 
         env.as_contract(&contract_id, || {
@@ -1328,7 +1339,7 @@ mod tests {
         );
 
         token_admin.mint(&funder, &500);
-        client.grant_fund(&grant_id, &funder, &500);
+        client.grant_fund(&grant_id, &funder, &500, &None);
 
         env.as_contract(&contract_id, || {
             let milestone = Milestone {
@@ -1496,6 +1507,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -1563,6 +1575,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
 
@@ -1780,6 +1793,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -1833,11 +1847,12 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
 
-        client.grant_fund(&grant_id, &funder, &fund_amount);
+        client.grant_fund(&grant_id, &funder, &fund_amount, &None);
 
         let token_client = token::Client::new(&env, &token_id);
         assert_eq!(token_client.balance(&funder), 500);
@@ -1861,7 +1876,7 @@ mod tests {
         let (client, _, _) = setup_test(&env);
         let funder = Address::generate(&env);
 
-        let result = client.try_grant_fund(&999u64, &funder, &100i128);
+        let result = client.try_grant_fund(&999u64, &funder, &100i128, &None);
         assert_eq!(result, Err(Ok(ContractError::GrantNotFound.into())));
     }
 
@@ -1879,11 +1894,11 @@ mod tests {
         create_grant(&env, &contract_id, grant_id, owner, token, Vec::new(&env));
 
         // Test with zero
-        let result = client.try_grant_fund(&grant_id, &funder, &0i128);
+        let result = client.try_grant_fund(&grant_id, &funder, &0i128, &None);
         assert_eq!(result, Err(Ok(ContractError::InvalidInput.into())));
 
         // Test with negative
-        let result2 = client.try_grant_fund(&grant_id, &funder, &-100i128);
+        let result2 = client.try_grant_fund(&grant_id, &funder, &-100i128, &None);
         assert_eq!(result2, Err(Ok(ContractError::InvalidInput.into())));
     }
 
@@ -1902,7 +1917,7 @@ mod tests {
 
         // Result should be a runtime auth failure, but we use typical test mechanisms
         // Soroban SDK try_ call returns an error if auth is missing
-        let result = client.try_grant_fund(&grant_id, &funder, &100i128);
+        let result = client.try_grant_fund(&grant_id, &funder, &100i128, &None);
         assert!(result.is_err()); // Authorization error
     }
 
@@ -1940,6 +1955,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -1989,12 +2005,13 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
 
-        client.grant_fund(&grant_id, &funder1, &300i128);
-        client.grant_fund(&grant_id, &funder2, &400i128);
+        client.grant_fund(&grant_id, &funder1, &300i128, &None);
+        client.grant_fund(&grant_id, &funder2, &400i128, &None);
 
         env.as_contract(&contract_id, || {
             let updated_grant = Storage::get_grant(&env, grant_id).unwrap();
@@ -2045,12 +2062,13 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
 
-        client.grant_fund(&grant_id, &funder, &300i128);
-        client.grant_fund(&grant_id, &funder, &200i128); // Second funding
+        client.grant_fund(&grant_id, &funder, &300i128, &None);
+        client.grant_fund(&grant_id, &funder, &200i128, &None); // Second funding
 
         env.as_contract(&contract_id, || {
             let updated_grant = Storage::get_grant(&env, grant_id).unwrap();
@@ -2098,12 +2116,13 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
 
-        client.grant_fund(&grant_id, &funder, &100i128);
-        client.grant_fund(&grant_id, &funder, &200i128);
+        client.grant_fund(&grant_id, &funder, &100i128, &None);
+        client.grant_fund(&grant_id, &funder, &200i128, &None);
 
         env.as_contract(&contract_id, || {
             let g = Storage::get_grant(&env, grant_id).unwrap();
@@ -2805,6 +2824,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: 0,
+                last_heartbeat: 0,
             };
             Storage::set_grant(&env, grant_id, &grant);
 
@@ -3059,6 +3079,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -3189,6 +3210,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -3233,6 +3255,7 @@ mod tests {
 
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -3663,6 +3686,7 @@ mod tests {
                 reason: None,
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -3809,6 +3833,7 @@ mod tests {
                 reason: None,
                 cancellation_requested_at: None,
                 timestamp: env.ledger().timestamp(),
+                last_heartbeat: env.ledger().timestamp(),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
