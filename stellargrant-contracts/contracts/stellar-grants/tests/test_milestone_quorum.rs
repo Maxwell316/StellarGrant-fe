@@ -47,7 +47,7 @@ fn test_milestone_voting_quorum_and_events() {
     assert_eq!(res1, false); // Quorum not reached yet
 
     let res2 = client.milestone_vote(&grant_id, &0, &reviewers.get(1).unwrap(), &true, &None);
-    assert_eq!(res2, true); // Quorum reached
+    assert_eq!(res2, true);
 
     let milestone = client.get_milestone(&grant_id, &0);
     assert_eq!(milestone.state, MilestoneState::Approved);
@@ -98,7 +98,7 @@ fn test_milestone_vote_after_quorum_panics() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
+#[should_panic(expected = "HostError: Error(Contract, #8)")]
 fn test_milestone_double_voting_panics() {
     use soroban_sdk::{testutils::Address as TestAddress, Address, Env, String, Vec};
     use stellar_grants::{StellarGrantsContractClient, COMMUNITY_REVIEW_PERIOD};
@@ -112,6 +112,7 @@ fn test_milestone_double_voting_panics() {
     reviewers.push_back(<Address as TestAddress>::generate(&env));
     reviewers.push_back(<Address as TestAddress>::generate(&env));
     let quorum = 2u32;
+    env.mock_all_auths();
 
     let grant_id = client.grant_create(
         &owner,
@@ -139,7 +140,5 @@ fn test_milestone_double_voting_panics() {
     env.ledger().set_timestamp(COMMUNITY_REVIEW_PERIOD + 1);
 
     let _ = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
-
-    // Reviewer 1 tries to vote again (should panic)
     let _ = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
 }

@@ -140,9 +140,9 @@ mod tests {
     };
     use crate::StellarGrantsContract;
     use crate::StellarGrantsContractClient;
-    use soroban_sdk::testutils::Ledger as _;
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
     use soroban_sdk::{
-        testutils::{storage::Persistent as _, Address as _, Events as _},
+        testutils::{storage::Persistent as _, Address as _},
         token, Address, Env, Map, String, Vec,
     };
 
@@ -651,10 +651,11 @@ mod tests {
 
         let owner = Address::generate(&env);
         let global_admin = Address::generate(&env);
+        let council = Address::generate(&env);
         let funder = Address::generate(&env);
         let grant_id = 11u64;
 
-        client.set_global_admin(&global_admin, &global_admin);
+        client.initialize(&global_admin, &council);
 
         token_admin.mint(&contract_id, &500);
 
@@ -2596,9 +2597,11 @@ mod tests {
         let owner = Address::generate(&env);
         let token = Address::generate(&env);
         let reviewer = Address::generate(&env);
+        let admin = Address::generate(&env);
         let council = Address::generate(&env);
 
-        client.initialize(&council);
+        env.mock_all_auths();
+        client.initialize(&admin, &council);
 
         let mut reviewers = Vec::new(&env);
         reviewers.push_back(reviewer.clone());
@@ -3150,6 +3153,18 @@ mod tests {
         );
 
         let result = client.try_grant_remove_reviewer(&grant_id, &owner, &reviewer);
+        assert_eq!(result, Err(Ok(ContractError::InvalidInput.into())));
+    }
+
+    #[test]
+    fn test_initialize_twice_returns_invalid_input() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _, _) = setup_test(&env);
+        let admin = Address::generate(&env);
+        let council = Address::generate(&env);
+        client.initialize(&admin, &council);
+        let result = client.try_initialize(&admin, &council);
         assert_eq!(result, Err(Ok(ContractError::InvalidInput.into())));
     }
 
@@ -4377,5 +4392,19 @@ mod tests {
             assert_eq!(g.status, GrantStatus::Active);
             assert_eq!(g.escrow_balance, 1500);
         });
+    }
+
+    #[test]
+    fn test_admin_change_wrong_old_admin_returns_not_contract_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _, _) = setup_test(&env);
+        let admin = Address::generate(&env);
+        let council = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        client.initialize(&admin, &council);
+        let result = client.try_admin_change(&attacker, &new_admin);
+        assert_eq!(result, Err(Ok(ContractError::NotContractAdmin.into())));
     }
 }
