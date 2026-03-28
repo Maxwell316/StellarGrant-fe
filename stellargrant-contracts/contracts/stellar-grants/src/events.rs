@@ -555,38 +555,21 @@ impl Events {
         event.publish(env);
     }
 
-    pub fn emit_heartbeat_updated(env: &Env, grant_id: u64, last_heartbeat: u64) {
-        let event = HeartbeatUpdated {
+    pub fn emit_grant_paused(env: &Env, grant_id: u64, actor: Address) {
+        let event = GrantPaused {
             event_version: EVENT_VERSION,
             grant_id,
-            last_heartbeat,
+            actor,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);
     }
 
-    pub fn emit_grant_gone_inactive(env: &Env, grant_id: u64, timestamp: u64) {
-        let event = GrantGoneInactive {
+    pub fn emit_grant_resumed(env: &Env, grant_id: u64, actor: Address) {
+        let event = GrantResumed {
             event_version: EVENT_VERSION,
             grant_id,
-            timestamp,
-        };
-        event.publish(env);
-    }
-
-    pub fn emit_payer_receipt(
-        env: &Env,
-        grant_id: u64,
-        funder: Address,
-        amount: i128,
-        memo: Option<String>,
-    ) {
-        let event = PayerReceipt {
-            event_version: EVENT_VERSION,
-            grant_id,
-            funder,
-            amount,
-            memo,
+            actor,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);
@@ -602,44 +585,51 @@ impl Events {
         };
         event.publish(env);
     }
-}
 
-#[contractevent]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HeartbeatUpdated {
-    pub event_version: u32,
-    pub grant_id: u64,
-    pub last_heartbeat: u64,
-    pub timestamp: u64,
-}
+    pub fn emit_payer_receipt(
+        env: &Env,
+        grant_id: u64,
+        payer: Address,
+        amount: i128,
+        memo: Option<String>,
+    ) {
+        let event = PayerReceipt {
+            event_version: EVENT_VERSION,
+            grant_id,
+            payer,
+            amount,
+            memo,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
 
-#[contractevent]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GrantGoneInactive {
-    pub event_version: u32,
-    pub grant_id: u64,
-    pub timestamp: u64,
-}
+    pub fn emit_heartbeat_updated(env: &Env, grant_id: u64, timestamp: u64) {
+        let event = HeartbeatUpdated {
+            event_version: EVENT_VERSION,
+            grant_id,
+            timestamp,
+        };
+        event.publish(env);
+    }
 
-#[contractevent]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PayerReceipt {
-    pub event_version: u32,
-    pub grant_id: u64,
-    pub funder: Address,
-    pub amount: i128,
-    pub memo: Option<String>,
-    pub timestamp: u64,
-}
+    pub fn emit_grant_gone_inactive(env: &Env, grant_id: u64, timestamp: u64) {
+        let event = GrantGoneInactive {
+            event_version: EVENT_VERSION,
+            grant_id,
+            timestamp,
+        };
+        event.publish(env);
+    }
 
-#[contractevent]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PayeeReceipt {
-    pub event_version: u32,
-    pub grant_id: u64,
-    pub payee: Address,
-    pub amount: i128,
-    pub timestamp: u64,
+    pub fn emit_grant_activated(env: &Env, grant_id: u64) {
+        let event = GrantActivated {
+            event_version: EVENT_VERSION,
+            grant_id,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
 }
 
 #[contractevent]
@@ -701,5 +691,68 @@ pub struct ReviewerRemoved {
     pub grant_id: u64,
     pub owner: Address,
     pub old_reviewer: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrantPaused {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrantResumed {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PayeeReceipt {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub payee: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PayerReceipt {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub payer: Address,
+    pub amount: i128,
+    pub memo: Option<String>,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeartbeatUpdated {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrantGoneInactive {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrantActivated {
+    pub event_version: u32,
+    pub grant_id: u64,
     pub timestamp: u64,
 }
