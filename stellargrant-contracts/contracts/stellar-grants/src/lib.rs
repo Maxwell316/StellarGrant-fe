@@ -434,10 +434,10 @@ impl StellarGrantsContract {
             let heartbeat_age = now.saturating_sub(grant.last_heartbeat);
             let heartbeat_timeout_60d = heartbeat_age > 60 * 24 * 60 * 60;
 
-            if !caller_is_admin
-                && !caller_is_owner
-                && !heartbeat_timeout_60d
-                && !(grant_is_inactive && caller_is_funder)
+            if !(caller_is_admin
+                || caller_is_owner
+                || heartbeat_timeout_60d
+                || (grant_is_inactive && caller_is_funder))
             {
                 return Err(ContractError::Unauthorized);
             }
