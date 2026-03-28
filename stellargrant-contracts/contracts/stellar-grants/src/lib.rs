@@ -100,7 +100,10 @@ impl StellarGrantsContract {
         if grant.owner != owner {
             return Err(ContractError::Unauthorized);
         }
-        if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+        if grant.status == GrantStatus::Inactive {
+            return Err(ContractError::HeartbeatMissed);
+        }
+        if grant.status != GrantStatus::Active {
             return Err(ContractError::InvalidState);
         }
 
@@ -409,7 +412,11 @@ impl StellarGrantsContract {
             let heartbeat_age = now.saturating_sub(grant.last_heartbeat);
             let heartbeat_timeout_60d = heartbeat_age > 60 * 24 * 60 * 60;
 
-            if !caller_is_admin && !caller_is_owner && !heartbeat_timeout_60d && !(grant_is_inactive && caller_is_funder) {
+            if !caller_is_admin
+                && !caller_is_owner
+                && !heartbeat_timeout_60d
+                && !(grant_is_inactive && caller_is_funder)
+            {
                 return Err(ContractError::Unauthorized);
             }
 
@@ -493,7 +500,10 @@ impl StellarGrantsContract {
                 return Err(ContractError::HeartbeatMissed);
             }
 
-            if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+            if grant.status == GrantStatus::Inactive {
+                return Err(ContractError::HeartbeatMissed);
+            }
+            if grant.status != GrantStatus::Active {
                 return Err(ContractError::InvalidState);
             }
 
@@ -545,7 +555,10 @@ impl StellarGrantsContract {
                 return Err(ContractError::HeartbeatMissed);
             }
 
-            if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+            if grant.status == GrantStatus::Inactive {
+                return Err(ContractError::HeartbeatMissed);
+            }
+            if grant.status != GrantStatus::Active {
                 return Err(ContractError::InvalidState);
             }
 
@@ -609,7 +622,10 @@ impl StellarGrantsContract {
 
     fn finalize_grant_release(env: &Env, grant_id: u64) -> Result<(), ContractError> {
         let mut grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
-        if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+        if grant.status == GrantStatus::Inactive {
+            return Err(ContractError::HeartbeatMissed);
+        }
+        if grant.status != GrantStatus::Active {
             return Err(ContractError::InvalidState);
         }
 
@@ -964,7 +980,10 @@ impl StellarGrantsContract {
 
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
-        if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+        if grant.status == GrantStatus::Inactive {
+            return Err(ContractError::HeartbeatMissed);
+        }
+        if grant.status != GrantStatus::Active {
             return Err(ContractError::InvalidState);
         }
 
@@ -1008,7 +1027,10 @@ impl StellarGrantsContract {
 
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
-        if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+        if grant.status == GrantStatus::Inactive {
+            return Err(ContractError::HeartbeatMissed);
+        }
+        if grant.status != GrantStatus::Active {
             return Err(ContractError::InvalidState);
         }
 
@@ -1059,7 +1081,10 @@ impl StellarGrantsContract {
             let mut grant =
                 Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
-            if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+            if grant.status == GrantStatus::Inactive {
+                return Err(ContractError::HeartbeatMissed);
+            }
+            if grant.status != GrantStatus::Active {
                 return Err(ContractError::InvalidState);
             }
 
@@ -1168,7 +1193,10 @@ impl StellarGrantsContract {
 
         reentrancy::with_non_reentrant(&env, || {
             let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-            if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+            if grant.status == GrantStatus::Inactive {
+                return Err(ContractError::HeartbeatMissed);
+            }
+            if grant.status != GrantStatus::Active {
                 return Err(ContractError::InvalidState);
             }
 
@@ -1284,7 +1312,10 @@ impl StellarGrantsContract {
                 let mut grant =
                     Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
-                if grant.status == GrantStatus::Inactive { return Err(ContractError::HeartbeatMissed); } if grant.status != GrantStatus::Active {
+                if grant.status == GrantStatus::Inactive {
+                    return Err(ContractError::HeartbeatMissed);
+                }
+                if grant.status != GrantStatus::Active {
                     return Err(ContractError::InvalidState);
                 }
 
@@ -1372,7 +1403,11 @@ impl StellarGrantsContract {
     }
 
     /// Admin function to blacklist an address from creating or interacting with grants.
-    pub fn admin_blacklist_add(env: Env, admin: Address, target: Address) -> Result<(), ContractError> {
+    pub fn admin_blacklist_add(
+        env: Env,
+        admin: Address,
+        target: Address,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
         let global_admin = Storage::get_global_admin(&env).ok_or(ContractError::Unauthorized)?;
         if admin != global_admin {
@@ -1384,7 +1419,11 @@ impl StellarGrantsContract {
     }
 
     /// Admin function to remove an address from the blacklist.
-    pub fn admin_blacklist_remove(env: Env, admin: Address, target: Address) -> Result<(), ContractError> {
+    pub fn admin_blacklist_remove(
+        env: Env,
+        admin: Address,
+        target: Address,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
         let global_admin = Storage::get_global_admin(&env).ok_or(ContractError::Unauthorized)?;
         if admin != global_admin {

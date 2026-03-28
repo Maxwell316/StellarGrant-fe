@@ -422,7 +422,7 @@ mod tests {
             funders,
             reason: None,
             timestamp: env.ledger().timestamp(),
-                last_heartbeat: env.ledger().timestamp(),
+            last_heartbeat: env.ledger().timestamp(),
         };
 
         env.as_contract(&contract_id, || {
@@ -488,7 +488,7 @@ mod tests {
             funders: Vec::new(&env),
             reason: None,
             timestamp: env.ledger().timestamp(),
-                last_heartbeat: env.ledger().timestamp(),
+            last_heartbeat: env.ledger().timestamp(),
         };
 
         env.as_contract(&contract_id, || {
@@ -711,7 +711,7 @@ mod tests {
             funders,
             reason: None,
             timestamp: env.ledger().timestamp(),
-                last_heartbeat: env.ledger().timestamp(),
+            last_heartbeat: env.ledger().timestamp(),
         };
 
         env.as_contract(&contract_id, || {
@@ -2641,7 +2641,7 @@ mod tests {
                 funders: Vec::new(&env),
                 reason: None,
                 timestamp: 0,
-            last_heartbeat: 0,
+                last_heartbeat: 0,
             };
             Storage::set_grant(&env, grant_id, &grant);
 
@@ -2768,13 +2768,13 @@ mod tests {
         let env = Env::default();
         let (client, admin, contract_id) = setup_test(&env);
         let global_admin = admin.clone();
-        
+
         // Setup Global Admin
         env.mock_all_auths();
         client.set_global_admin(&admin, &global_admin);
 
         let target = Address::generate(&env);
-        
+
         // Add to blacklist
         client.admin_blacklist_add(&global_admin, &target);
 
@@ -2798,13 +2798,13 @@ mod tests {
             &2,
             &Vec::new(&env),
             &1,
-            &None
+            &None,
         );
         assert_eq!(result2, Err(Ok(ContractError::Blacklisted.into())));
 
         // Remove from blacklist
         client.admin_blacklist_remove(&global_admin, &target);
-        
+
         // Now register should succeed
         client.contributor_register(&target, &name, &bio, &skills, &github);
     }
@@ -2814,7 +2814,7 @@ mod tests {
         let env = Env::default();
         env.mock_all_auths();
         let (client, _, contract_id) = setup_test(&env);
-        
+
         let owner = Address::generate(&env);
         let token = Address::generate(&env);
         let mut reviewers = Vec::new(&env);
@@ -2829,7 +2829,7 @@ mod tests {
             &2,
             &reviewers,
             &1,
-            &None
+            &None,
         );
 
         // Fast-forward 31 days
@@ -2839,7 +2839,7 @@ mod tests {
         // Note: grant_ping doesn't check status first, it updates it.
         // But milestone_submit does.
         create_milestone(&env, &contract_id, grant_id, 0, MilestoneState::Pending);
-        
+
         // Manual inactive status update for testing (since heartbeat check is in logic)
         env.as_contract(&contract_id, || {
             let mut grant = Storage::get_grant(&env, grant_id).unwrap();
@@ -2850,12 +2850,18 @@ mod tests {
             }
         });
 
-        let result = client.try_milestone_submit(&grant_id, &0, &owner, &String::from_str(&env, "M1"), &String::from_str(&env, "url"));
+        let result = client.try_milestone_submit(
+            &grant_id,
+            &0,
+            &owner,
+            &String::from_str(&env, "M1"),
+            &String::from_str(&env, "url"),
+        );
         assert_eq!(result, Err(Ok(ContractError::HeartbeatMissed.into())));
 
         // Ping to restore
         client.grant_ping(&grant_id, &owner);
-        
+
         env.as_contract(&contract_id, || {
             let grant = Storage::get_grant(&env, grant_id).unwrap();
             assert_eq!(grant.status, GrantStatus::Active);
@@ -2863,7 +2869,13 @@ mod tests {
         });
 
         // Now submit should work
-        client.milestone_submit(&grant_id, &0, &owner, &String::from_str(&env, "M1"), &String::from_str(&env, "url"));
+        client.milestone_submit(
+            &grant_id,
+            &0,
+            &owner,
+            &String::from_str(&env, "M1"),
+            &String::from_str(&env, "url"),
+        );
     }
 
     #[test]
@@ -2871,12 +2883,12 @@ mod tests {
         let env = Env::default();
         env.mock_all_auths();
         let (client, admin, contract_id) = setup_test(&env);
-        
+
         let owner = Address::generate(&env);
         let token_contract = env.register_stellar_asset_contract_v2(admin);
         let token_id = token_contract.address();
         let token_admin = token::StellarAssetClient::new(&env, &token_id);
-        
+
         let mut reviewers = Vec::new(&env);
         reviewers.push_back(owner.clone());
         let grant_id = client.grant_create(
@@ -2889,12 +2901,12 @@ mod tests {
             &2,
             &reviewers,
             &1,
-            &None
+            &None,
         );
 
         let funder = Address::generate(&env);
         token_admin.mint(&funder, &1000);
-        
+
         let memo = Some(String::from_str(&env, "Grant Support"));
         client.grant_fund(&grant_id, &funder, &1000, &memo);
 
