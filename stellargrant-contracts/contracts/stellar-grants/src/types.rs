@@ -96,6 +96,7 @@ pub struct Milestone {
     pub idx: u32,
     pub description: String,
     pub amount: i128,
+    pub payout_token: Address, // New: Specify the token for this milestone
     pub state: MilestoneState,
     pub votes: Map<Address, bool>,
     pub approvals: u32,
@@ -117,6 +118,7 @@ pub struct MilestoneSubmission {
     pub idx: u32,
     pub description: String,
     pub proof: String,
+    pub payout_token: Option<Address>, // New: Optional override for the payout token
 }
 
 #[contracttype]
@@ -144,6 +146,7 @@ pub enum GrantStatus {
 pub struct GrantFund {
     pub funder: Address,
     pub amount: i128,
+    pub token: Address, // New: Specify which token was contributed
 }
 
 #[contracttype]
@@ -153,7 +156,7 @@ pub struct Grant {
     pub owner: Address,
     pub title: String,
     pub description: String,
-    pub token: Address,
+    pub primary_token: Address, // Renamed from 'token' for clarity
     pub status: GrantStatus,
     pub total_amount: i128,
     pub milestone_amount: i128,
@@ -161,7 +164,7 @@ pub struct Grant {
     pub quorum: u32,
     pub total_milestones: u32,
     pub milestones_paid_out: u32,
-    pub escrow_balance: i128,
+    pub escrow_balances: Map<Address, i128>, // New: Track balance per token
     pub funders: Vec<GrantFund>,
     pub reason: Option<String>,
     pub timestamp: u64,

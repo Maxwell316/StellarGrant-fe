@@ -224,10 +224,19 @@
                   },
                   {
                     "key": {
-                      "symbol": "escrow_balance"
+                      "symbol": "escrow_balances"
                     },
                     "val": {
-                      "i128": "1000"
+                      "map": [
+                        {
+                          "key": {
+                            "address": "CDS3FDGQ4JA2V3F26Y4BMWWJEC5TT26RJBN7KIQKUMVO2MAOCMDTSZ7A"
+                          },
+                          "val": {
+                            "i128": "900"
+                          }
+                        }
+                      ]
                     }
                   },
                   {
@@ -288,6 +297,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "primary_token"
+                    },
+                    "val": {
+                      "address": "CDS3FDGQ4JA2V3F26Y4BMWWJEC5TT26RJBN7KIQKUMVO2MAOCMDTSZ7A"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "quorum"
                     },
                     "val": {
@@ -344,14 +361,6 @@
                   },
                   {
                     "key": {
-                      "symbol": "token"
-                    },
-                    "val": {
-                      "address": "CDS3FDGQ4JA2V3F26Y4BMWWJEC5TT26RJBN7KIQKUMVO2MAOCMDTSZ7A"
-                    }
-                  },
-                  {
-                    "key": {
                       "symbol": "total_amount"
                     },
                     "val": {
@@ -363,7 +372,7 @@
                       "symbol": "total_milestones"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   }
                 ]
@@ -451,6 +460,14 @@
                     },
                     "val": {
                       "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "payout_token"
+                    },
+                    "val": {
+                      "address": "CDS3FDGQ4JA2V3F26Y4BMWWJEC5TT26RJBN7KIQKUMVO2MAOCMDTSZ7A"
                     }
                   },
                   {
@@ -1010,7 +1027,7 @@
                     "symbol": "new_state"
                   },
                   "val": {
-                    "u32": 8
+                    "u32": 3
                   }
                 },
                 {
@@ -1019,6 +1036,75 @@
                   },
                   "val": {
                     "u64": "0"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "milestone_paid"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "amount"
+                  },
+                  "val": {
+                    "i128": "100"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "event_version"
+                  },
+                  "val": {
+                    "u32": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "grant_id"
+                  },
+                  "val": {
+                    "u64": "21"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "milestone_idx"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": "0"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "token"
+                  },
+                  "val": {
+                    "address": "CDS3FDGQ4JA2V3F26Y4BMWWJEC5TT26RJBN7KIQKUMVO2MAOCMDTSZ7A"
                   }
                 }
               ]
