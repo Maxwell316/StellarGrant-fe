@@ -85,7 +85,13 @@ impl StellarGrantsContract {
                     fee_token: fee_token.clone(),
                 },
             );
-            Events::emit_dispute_fee_charged(&env, grant_id, milestone_idx, caller.clone(), fee_amount);
+            Events::emit_dispute_fee_charged(
+                &env,
+                grant_id,
+                milestone_idx,
+                caller.clone(),
+                fee_amount,
+            );
         }
 
         milestone.set_state(MilestoneState::Disputed);
@@ -402,9 +408,14 @@ impl StellarGrantsContract {
     }
 
     /// Set the global dispute fee amount (admin-only). Issue #152.
-    pub fn set_dispute_fee(env: Env, admin: Address, fee_amount: i128) -> Result<(), ContractError> {
+    pub fn set_dispute_fee(
+        env: Env,
+        admin: Address,
+        fee_amount: i128,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
-        let stored_admin = Storage::get_global_admin(&env).ok_or(ContractError::NotContractAdmin)?;
+        let stored_admin =
+            Storage::get_global_admin(&env).ok_or(ContractError::NotContractAdmin)?;
         if stored_admin != admin {
             return Err(ContractError::NotContractAdmin);
         }
@@ -678,7 +689,12 @@ impl StellarGrantsContract {
         Storage::set_escrow_state(
             &env,
             grant_id,
-            &EscrowState::new(EscrowMode::Standard, EscrowLifecycleState::Funding, false, 0),
+            &EscrowState::new(
+                EscrowMode::Standard,
+                EscrowLifecycleState::Funding,
+                false,
+                0,
+            ),
         );
         Storage::set_multisig_signers(&env, grant_id, &soroban_sdk::Vec::new(&env));
 
@@ -689,7 +705,14 @@ impl StellarGrantsContract {
                 0
             };
 
-            let milestone = Milestone::new(i, String::from_str(&env, ""), milestone_amount, token.clone(), deadline, &env);
+            let milestone = Milestone::new(
+                i,
+                String::from_str(&env, ""),
+                milestone_amount,
+                token.clone(),
+                deadline,
+                &env,
+            );
             Storage::set_milestone(&env, grant_id, i, &milestone);
         }
         // Enhanced event emission: include all relevant data, standardize topics
@@ -841,7 +864,12 @@ impl StellarGrantsContract {
         Storage::set_escrow_state(
             &env,
             grant_id,
-            &EscrowState::new(EscrowMode::HighSecurity, EscrowLifecycleState::Funding, false, 0),
+            &EscrowState::new(
+                EscrowMode::HighSecurity,
+                EscrowLifecycleState::Funding,
+                false,
+                0,
+            ),
         );
         Storage::set_multisig_signers(&env, grant_id, &multisig_signers);
 
@@ -1746,7 +1774,9 @@ impl StellarGrantsContract {
             if grant.status() == GrantStatus::Inactive {
                 return Err(ContractError::HeartbeatMissed);
             }
-            if grant.status() != GrantStatus::Active && grant.status() != GrantStatus::PendingFunding {
+            if grant.status() != GrantStatus::Active
+                && grant.status() != GrantStatus::PendingFunding
+            {
                 return Err(ContractError::InvalidState);
             }
 
@@ -1809,7 +1839,8 @@ impl StellarGrantsContract {
                 .escrow_balances
                 .get(grant.primary_token.clone())
                 .unwrap_or(0);
-            if grant.status() == GrantStatus::PendingFunding && primary_balance >= grant.min_funding {
+            if grant.status() == GrantStatus::PendingFunding && primary_balance >= grant.min_funding
+            {
                 grant.set_status(GrantStatus::Active);
                 Storage::index_transition(
                     &env,

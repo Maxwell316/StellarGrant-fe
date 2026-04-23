@@ -387,7 +387,10 @@ impl Storage {
     pub fn has_milestone_reputation_applied(env: &Env, grant_id: u64, milestone_idx: u32) -> bool {
         env.storage()
             .persistent()
-            .has(&DataKey::MilestoneReputationApplied(grant_id, milestone_idx))
+            .has(&DataKey::MilestoneReputationApplied(
+                grant_id,
+                milestone_idx,
+            ))
     }
 
     pub fn mark_milestone_reputation_applied(env: &Env, grant_id: u64, milestone_idx: u32) {
