@@ -2559,7 +2559,7 @@ impl StellarGrantsContract {
         assert_not_paused(&env)?;
 
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-        if grant.status != GrantStatus::Active {
+        if grant.status() != GrantStatus::Active {
             return Err(ContractError::InvalidState);
         }
 
