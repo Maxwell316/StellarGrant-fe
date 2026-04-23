@@ -1790,10 +1790,6 @@ impl StellarGrantsContract {
                 .checked_add(amount)
                 .ok_or(ContractError::InvalidInput)?;
 
-            // Enforce hard cap if set (hard_cap > 0)
-            // hard_cap enforcement is intentionally skipped (field not stored on Grant)
-            }
-
             grant.escrow_balances.set(token.clone(), new_balance);
 
             // Update funds tracking (per token)
