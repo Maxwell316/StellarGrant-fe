@@ -152,8 +152,7 @@ fn test_reputation_idempotent_per_milestone() {
         .unwrap()
         .reputation_score;
     assert_eq!(
-        rep_after_first,
-        rep_unchanged,
+        rep_after_first, rep_unchanged,
         "reputation must not double-count"
     );
 }

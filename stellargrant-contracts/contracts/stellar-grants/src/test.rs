@@ -496,19 +496,16 @@ mod tests {
                 1000,
                 500,
                 reviewers,
-                quorum: 3,
-                total_milestones: 2,
-                milestones_paid_out: 0,
-                escrow_balances,
-                funders: Vec::new(&env),
-                reason: None,
-                timestamp: env.ledger().timestamp(),
-                last_heartbeat: env.ledger().timestamp(),
-                min_funding: 0,
-                hard_cap: 0,
-                tags: Vec::new(&env),
-                cancellation_requested_at: None,
-            };
+                GrantStatus::Active,
+                3,
+                2,
+                env.ledger().timestamp(),
+                0,
+                &env,
+            );
+            let mut escrow_balances = Map::new(&env);
+            escrow_balances.set(token_id.clone(), 1000);
+            grant.escrow_balances = escrow_balances;
             Storage::set_grant(&env, grant_id, &grant);
         });
 
