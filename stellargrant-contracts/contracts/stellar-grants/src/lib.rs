@@ -344,6 +344,124 @@ impl StellarGrantsContract {
         Ok(())
     }
 
+    /// Claws back all remaining escrowed funds from a grant in cases of proven fraud.
+    ///
+    /// Only callable by the registered council address. Iterates through all tokens
+    /// in the grant's `escrow_balances` and refunds each non-zero balance to the
+    /// original funders pro-rata (matching the logic used in `resolve_dispute`).
+    /// Sets the grant status to [`GrantStatus::Cancelled`] and emits a
+    /// [`Events::emit_grant_clawbacked`] event.
+    ///
+    /// # Arguments
+    /// * `council` - The DAO Council address (must match the registered council).
+    /// * `grant_id` - The grant whose escrowed funds are to be clawed back.
+    ///
+    /// # Errors
+    /// * [`ContractError::Unauthorized`] – caller is not the registered council.
+    /// * [`ContractError::GrantNotFound`] – grant does not exist.
+    /// * [`ContractError::InvalidState`] – grant is already Cancelled or Completed.
+    pub fn grant_clawback(
+        env: Env,
+        council: Address,
+        grant_id: u64,
+    ) -> Result<(), ContractError> {
+        council.require_auth();
+
+        let council_addr = Storage::get_council(&env).ok_or(ContractError::InvalidInput)?;
+        if council_addr != council {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+
+        // Only clawback grants that are still active (not already cancelled/completed).
+        if grant.status() == GrantStatus::Cancelled || grant.status() == GrantStatus::Completed {
+            return Err(ContractError::InvalidState);
+        }
+
+        let mut total_clawed_back: i128 = 0;
+
+        // Collect all token addresses from escrow_balances to avoid borrow issues.
+        let mut token_list: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+        for (token, _) in grant.escrow_balances.iter() {
+            token_list.push_back(token);
+        }
+
+        for token in token_list.iter() {
+            let balance = grant.escrow_balances.get(token.clone()).unwrap_or(0);
+            if balance <= 0 {
+                continue;
+            }
+
+            let token_client = token::Client::new(&env, &token);
+
+            // Pro-rata refund to funders who contributed in this token.
+            let mut total_token_contributions: i128 = 0;
+            let mut token_funders: soroban_sdk::Vec<GrantFund> = soroban_sdk::Vec::new(&env);
+            for fund_entry in grant.funders.iter() {
+                if fund_entry.token == token {
+                    total_token_contributions += fund_entry.amount;
+                    token_funders.push_back(fund_entry);
+                }
+            }
+
+            if total_token_contributions > 0 {
+                let token_funders_len = token_funders.len();
+                let mut distributed: i128 = 0;
+
+                for i in 0..token_funders_len {
+                    let fund_entry = token_funders.get(i).unwrap();
+                    let is_last = i + 1 == token_funders_len;
+                    let refund_amount = if is_last {
+                        balance - distributed
+                    } else {
+                        let amount = fund_entry
+                            .amount
+                            .checked_mul(balance)
+                            .ok_or(ContractError::InvalidInput)?
+                            .checked_div(total_token_contributions)
+                            .ok_or(ContractError::InvalidInput)?;
+                        distributed += amount;
+                        amount
+                    };
+
+                    if refund_amount > 0 {
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &fund_entry.funder,
+                            &refund_amount,
+                        );
+                        Events::emit_refund_issued(
+                            &env,
+                            grant_id,
+                            fund_entry.funder.clone(),
+                            refund_amount,
+                            token.clone(),
+                        );
+                    }
+                }
+            } else {
+                // No funders recorded for this token; send the entire balance to the council
+                // as a fallback to avoid permanently locking funds.
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &council,
+                    &balance,
+                );
+            }
+
+            total_clawed_back += balance;
+            grant.escrow_balances.set(token.clone(), 0);
+        }
+
+        grant.set_status(GrantStatus::Cancelled);
+        Storage::set_grant(&env, grant_id, &grant);
+
+        Events::emit_grant_clawbacked(&env, grant_id, council, total_clawed_back);
+
+        Ok(())
+    }
+
     /// Allows the grant owner to manually withdraw funds for an approved milestone.
     pub fn grant_withdraw(
         env: Env,
@@ -1425,6 +1543,16 @@ impl StellarGrantsContract {
 
         if !grant.reviewers.contains(reviewer.clone()) {
             return Err(ContractError::Unauthorized);
+        }
+
+        // Issue #164: enforce MinReviewerStake — reviewer must have staked at least
+        // the global minimum before they can cast a vote on any milestone.
+        let min_stake = Storage::get_min_reviewer_stake(&env);
+        if min_stake > 0 {
+            let reviewer_stake = Storage::get_reviewer_stake(&env, grant_id, &reviewer);
+            if reviewer_stake < min_stake {
+                return Err(ContractError::InsufficientStake);
+            }
         }
 
         // Duplicate-vote guard: return error if reviewer already voted

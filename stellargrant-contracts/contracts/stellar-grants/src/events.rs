@@ -871,6 +871,24 @@ impl Events {
         };
         event.publish(env);
     }
+
+    // ── Issue #163: grant clawback event ─────────────────────────────────────
+
+    pub fn emit_grant_clawbacked(
+        env: &Env,
+        grant_id: u64,
+        council: Address,
+        total_clawed_back: i128,
+    ) {
+        let event = GrantClawbacked {
+            event_version: EVENT_VERSION,
+            grant_id,
+            council,
+            total_clawed_back,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
 }
 
 #[contractevent]
@@ -1057,5 +1075,18 @@ pub struct ReputationUpdated {
     pub contributor: Address,
     pub new_reputation_score: u64,
     pub total_earned: i128,
+    pub timestamp: u64,
+}
+
+/// Emitted when the DAO Council claws back escrowed funds from a fraudulent grant (issue #163).
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrantClawbacked {
+    pub event_version: u32,
+    pub grant_id: u64,
+    /// The council address that initiated the clawback.
+    pub council: Address,
+    /// Total amount returned across all tokens.
+    pub total_clawed_back: i128,
     pub timestamp: u64,
 }

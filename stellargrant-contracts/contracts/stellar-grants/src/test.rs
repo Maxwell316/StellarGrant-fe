@@ -5796,4 +5796,249 @@ mod tests {
         );
         assert!(result.is_err(), "Should reject tags longer than 20 chars");
     }
+
+    // ── Issue #164: milestone_vote stake enforcement ──────────────────────────
+
+    #[test]
+    fn test_milestone_vote_fails_when_reviewer_has_insufficient_stake() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, contract_id) = setup_test(&env);
+        let council = Address::generate(&env);
+        client.initialize(&admin, &council);
+
+        let grant_id = 200u64;
+        let milestone_idx = 0u32;
+        let owner = Address::generate(&env);
+        let reviewer = Address::generate(&env);
+
+        let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = token_contract.address();
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+        token_admin.mint(&contract_id, &500);
+
+        let mut reviewers = Vec::new(&env);
+        reviewers.push_back(reviewer.clone());
+        create_grant(&env, &contract_id, grant_id, owner, token_id.clone(), reviewers);
+        create_milestone(&env, &contract_id, grant_id, milestone_idx, MilestoneState::Submitted);
+
+        // Set MinReviewerStake to 100 but reviewer has staked nothing.
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&crate::storage::DataKey::MinReviewerStake, &100i128);
+        });
+
+        let result = client.try_milestone_vote(&grant_id, &milestone_idx, &reviewer, &true, &None);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::InsufficientStake.into())),
+            "vote should fail when reviewer stake < MinReviewerStake"
+        );
+    }
+
+    #[test]
+    fn test_milestone_vote_succeeds_when_reviewer_has_sufficient_stake() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, contract_id) = setup_test(&env);
+        let council = Address::generate(&env);
+        client.initialize(&admin, &council);
+
+        let grant_id = 201u64;
+        let milestone_idx = 0u32;
+        let owner = Address::generate(&env);
+        let reviewer = Address::generate(&env);
+
+        let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = token_contract.address();
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+        // Mint enough for escrow payout + stake transfer
+        token_admin.mint(&contract_id, &500);
+        token_admin.mint(&reviewer, &200);
+
+        let mut reviewers = Vec::new(&env);
+        reviewers.push_back(reviewer.clone());
+        create_grant(&env, &contract_id, grant_id, owner.clone(), token_id.clone(), reviewers);
+        create_milestone(&env, &contract_id, grant_id, milestone_idx, MilestoneState::Submitted);
+
+        // Set MinReviewerStake to 100 and record that reviewer has staked 100.
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&crate::storage::DataKey::MinReviewerStake, &100i128);
+            env.storage().persistent().set(
+                &crate::storage::DataKey::ReviewerStake(grant_id, reviewer.clone()),
+                &100i128,
+            );
+        });
+
+        // Vote should succeed because stake meets the minimum.
+        let result = client.milestone_vote(&grant_id, &milestone_idx, &reviewer, &true, &None);
+        assert!(result, "vote should succeed when stake >= MinReviewerStake");
+    }
+
+    #[test]
+    fn test_milestone_vote_succeeds_when_no_min_stake_configured() {
+        // When MinReviewerStake is 0 (default), no stake check is applied.
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, contract_id) = setup_test(&env);
+        let council = Address::generate(&env);
+        client.initialize(&admin, &council);
+
+        let grant_id = 202u64;
+        let milestone_idx = 0u32;
+        let owner = Address::generate(&env);
+        let reviewer = Address::generate(&env);
+
+        let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = token_contract.address();
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+        token_admin.mint(&contract_id, &500);
+
+        let mut reviewers = Vec::new(&env);
+        reviewers.push_back(reviewer.clone());
+        create_grant(&env, &contract_id, grant_id, owner.clone(), token_id.clone(), reviewers);
+        create_milestone(&env, &contract_id, grant_id, milestone_idx, MilestoneState::Submitted);
+
+        // MinReviewerStake is 0 by default — reviewer with zero stake should still be able to vote.
+        let result = client.milestone_vote(&grant_id, &milestone_idx, &reviewer, &true, &None);
+        assert!(result, "vote should succeed when MinReviewerStake is 0");
+    }
+
+    // ── Issue #163: grant_clawback ────────────────────────────────────────────
+
+    #[test]
+    fn test_grant_clawback_council_returns_funds_pro_rata() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, contract_id) = setup_test(&env);
+        let council = Address::generate(&env);
+        client.initialize(&admin, &council);
+
+        let grant_id = 300u64;
+        let owner = Address::generate(&env);
+        let funder1 = Address::generate(&env);
+        let funder2 = Address::generate(&env);
+
+        let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = token_contract.address();
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+        let escrow_balance: i128 = 1000;
+        token_admin.mint(&contract_id, &escrow_balance);
+
+        let mut funders = Vec::new(&env);
+        funders.push_back(GrantFund {
+            funder: funder1.clone(),
+            amount: 600,
+            token: token_id.clone(),
+        });
+        funders.push_back(GrantFund {
+            funder: funder2.clone(),
+            amount: 400,
+            token: token_id.clone(),
+        });
+
+        env.as_contract(&contract_id, || {
+            let mut grant = Grant::new(
+                grant_id,
+                owner.clone(),
+                String::from_str(&env, "Fraudulent grant"),
+                String::from_str(&env, "Desc"),
+                token_id.clone(),
+                escrow_balance,
+                500,
+                Vec::new(&env),
+                GrantStatus::Active,
+                1,
+                2,
+                env.ledger().timestamp(),
+                0,
+                &env,
+            );
+            let mut escrow_balances = Map::new(&env);
+            escrow_balances.set(token_id.clone(), escrow_balance);
+            grant.escrow_balances = escrow_balances;
+            grant.funders = funders;
+            Storage::set_grant(&env, grant_id, &grant);
+        });
+
+        // Council claws back funds.
+        client.grant_clawback(&council, &grant_id);
+
+        // Verify pro-rata refunds: funder1 gets 600, funder2 gets 400.
+        let token_client = token::Client::new(&env, &token_id);
+        assert_eq!(token_client.balance(&funder1), 600);
+        assert_eq!(token_client.balance(&funder2), 400);
+
+        // Verify grant is now cancelled.
+        env.as_contract(&contract_id, || {
+            let updated = Storage::get_grant(&env, grant_id).unwrap();
+            assert_eq!(updated.status(), GrantStatus::Cancelled);
+            assert_eq!(updated.escrow_balances.get(token_id.clone()).unwrap_or(0), 0);
+        });
+    }
+
+    #[test]
+    fn test_grant_clawback_non_council_is_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, contract_id) = setup_test(&env);
+        let council = Address::generate(&env);
+        let impostor = Address::generate(&env);
+        client.initialize(&admin, &council);
+
+        let grant_id = 301u64;
+        let owner = Address::generate(&env);
+        let token = Address::generate(&env);
+        create_grant(&env, &contract_id, grant_id, owner, token, Vec::new(&env));
+
+        let result = client.try_grant_clawback(&impostor, &grant_id);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::Unauthorized.into())),
+            "non-council caller must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_grant_clawback_on_cancelled_grant_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, contract_id) = setup_test(&env);
+        let council = Address::generate(&env);
+        client.initialize(&admin, &council);
+
+        let grant_id = 302u64;
+        let owner = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let mut grant = Grant::new(
+                grant_id,
+                owner,
+                String::from_str(&env, "Already cancelled"),
+                String::from_str(&env, "Desc"),
+                token,
+                500,
+                500,
+                Vec::new(&env),
+                GrantStatus::Cancelled,
+                1,
+                1,
+                env.ledger().timestamp(),
+                0,
+                &env,
+            );
+            Storage::set_grant(&env, grant_id, &grant);
+        });
+
+        let result = client.try_grant_clawback(&council, &grant_id);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::InvalidState.into())),
+            "clawback on an already-cancelled grant must be rejected"
+        );
+    }
 }
