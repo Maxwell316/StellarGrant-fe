@@ -110,7 +110,19 @@ impl StellarGrantsContract {
         milestone_idx: u32,
     ) -> Result<(), ContractError> {
         let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-        let mut milestone = Storage::get_milestone(&env, grant_id, milestone_idx)
+        Self::internal_milestone_approve(&env, &mut grant, grant_id, milestone_idx)?;
+        Storage::set_grant(&env, grant_id, &grant);
+        Ok(())
+    }
+
+    /// Internal helper to approve a single milestone.
+    fn internal_milestone_approve(
+        env: &Env,
+        grant: &mut Grant,
+        grant_id: u64,
+        milestone_idx: u32,
+    ) -> Result<(), ContractError> {
+        let mut milestone = Storage::get_milestone(env, grant_id, milestone_idx)
             .ok_or(ContractError::MilestoneNotFound)?;
 
         if milestone.state() == MilestoneState::Approved {
@@ -146,26 +158,58 @@ impl StellarGrantsContract {
         grant.escrow_balances.set(payout_token.clone(), new_balance);
         grant.set_milestones_paid_out(grant.milestones_paid_out() + 1);
 
-        Storage::set_milestone(&env, grant_id, milestone_idx, &milestone);
-        Storage::set_grant(&env, grant_id, &grant);
+        Storage::set_milestone(env, grant_id, milestone_idx, &milestone);
 
-        let token_client = token::Client::new(&env, &payout_token);
+        let token_client = token::Client::new(env, &payout_token);
         token_client.transfer(&env.current_contract_address(), &recipient, &amount);
 
         // Issue #151: credit reputation after payout
-        Self::update_contributor_reputation(&env, grant_id, milestone_idx, &recipient, amount);
+        Self::update_contributor_reputation(env, grant_id, milestone_idx, &recipient, amount);
 
         // Events
         Events::emit_milestone_approved(
-            &env,
+            env,
             grant_id,
             milestone_idx,
             amount,
             payout_token.clone(),
             recipient.clone(),
         );
-        Events::emit_payout_executed(&env, grant_id, recipient, amount, payout_token);
+        Events::emit_payout_executed(env, grant_id, recipient, amount, payout_token);
 
+        Ok(())
+    }
+
+    /// Allows a reviewer to approve multiple submitted milestones in a single transaction.
+    pub fn batch_milestone_approve(
+        env: Env,
+        grant_id: u64,
+        milestone_indices: Vec<u32>,
+        reviewer: Address,
+    ) -> Result<(), ContractError> {
+        reviewer.require_auth();
+        assert_not_paused(&env)?;
+
+        let batch_len = milestone_indices.len();
+        if batch_len == 0 {
+            return Err(ContractError::BatchEmpty);
+        }
+        if batch_len > 20 {
+            return Err(ContractError::BatchTooLarge);
+        }
+
+        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        
+        // Ensure the caller is an authorized reviewer for this grant
+        if !grant.reviewers.contains(reviewer) {
+            return Err(ContractError::Unauthorized);
+        }
+
+        for milestone_idx in milestone_indices.iter() {
+            Self::internal_milestone_approve(&env, &mut grant, grant_id, milestone_idx)?;
+        }
+
+        Storage::set_grant(&env, grant_id, &grant);
         Ok(())
     }
 
@@ -519,6 +563,89 @@ impl StellarGrantsContract {
         Ok(())
     }
 
+    /// Allows the grant owner to request a deadline extension for a specific milestone.
+    pub fn request_milestone_extension(
+        env: Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        new_deadline: u64,
+    ) -> Result<(), ContractError> {
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        grant.owner.require_auth();
+        assert_not_paused(&env)?;
+
+        let mut milestone = Storage::get_milestone(&env, grant_id, milestone_idx)
+            .ok_or(ContractError::MilestoneNotFound)?;
+
+        if new_deadline <= milestone.deadline {
+            return Err(ContractError::InvalidInput);
+        }
+
+        milestone.pending_extension_deadline = Some(new_deadline);
+        milestone.extension_votes = soroban_sdk::Map::new(&env);
+        Storage::set_milestone(&env, grant_id, milestone_idx, &milestone);
+
+        Events::emit_milestone_extension_requested(&env, grant_id, milestone_idx, new_deadline);
+
+        Ok(())
+    }
+
+    /// Allows reviewers to approve a requested milestone deadline extension.
+    pub fn approve_milestone_extension(
+        env: Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        reviewer: Address,
+    ) -> Result<(), ContractError> {
+        reviewer.require_auth();
+        assert_not_paused(&env)?;
+
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if !grant.reviewers.contains(reviewer.clone()) {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let mut milestone = Storage::get_milestone(&env, grant_id, milestone_idx)
+            .ok_or(ContractError::MilestoneNotFound)?;
+
+        let new_deadline = milestone
+            .pending_extension_deadline
+            .ok_or(ContractError::InvalidState)?;
+
+        if milestone.extension_votes.contains_key(reviewer.clone()) {
+            return Err(ContractError::AlreadyVoted);
+        }
+
+        milestone.extension_votes.set(reviewer.clone(), true);
+
+        // Calculate current extension approvals
+        let mut extension_approvals: u32 = 0;
+        for (_, approved) in milestone.extension_votes.iter() {
+            if approved {
+                extension_approvals += 1;
+            }
+        }
+
+        Events::emit_milestone_extension_approved(
+            &env,
+            grant_id,
+            milestone_idx,
+            reviewer,
+            extension_approvals,
+            grant.quorum(),
+        );
+
+        if extension_approvals >= grant.quorum() {
+            milestone.deadline = new_deadline;
+            milestone.pending_extension_deadline = None;
+            milestone.extension_votes = soroban_sdk::Map::new(&env);
+        }
+
+        Storage::set_milestone(&env, grant_id, milestone_idx, &milestone);
+
+        Ok(())
+    }
+
     /// Set the global dispute fee amount (admin-only). Issue #152.
     pub fn set_dispute_fee(
         env: Env,
@@ -830,6 +957,8 @@ impl StellarGrantsContract {
                 submission_timestamp: 0,
                 deadline,
                 community_comments: soroban_sdk::Map::new(&env),
+                pending_extension_deadline: None,
+                extension_votes: soroban_sdk::Map::new(&env),
                 packed_stats: 0,
             };
             milestone.set_idx(i);

@@ -143,6 +143,28 @@ pub struct ContributorRegistered {
     pub name: String,
     pub timestamp: u64,
 }
+ 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MilestoneExtensionRequested {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub milestone_idx: u32,
+    pub new_deadline: u64,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MilestoneExtensionApproved {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub milestone_idx: u32,
+    pub reviewer: Address,
+    pub approvals: u32,
+    pub quorum: u32,
+    pub timestamp: u64,
+}
 
 #[contractevent]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,7 +207,7 @@ pub struct GrantCreated {
     pub owner: Address,
     pub title: String,
     pub total_amount: i128,
-    pub tags: Vec<soroban_sdk::Symbol>,
+    pub tags: Vec<soroban_sdk::String>,
     pub timestamp: u64,
 }
 
@@ -415,7 +437,7 @@ impl Events {
         owner: Address,
         title: String,
         total_amount: i128,
-        tags: Vec<soroban_sdk::Symbol>,
+        tags: Vec<soroban_sdk::String>,
     ) {
         let event = GrantCreated {
             event_version: EVENT_VERSION,
@@ -458,6 +480,42 @@ impl Events {
             grant_id,
             contributor,
             name,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_milestone_extension_requested(
+        env: &Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        new_deadline: u64,
+    ) {
+        let event = MilestoneExtensionRequested {
+            event_version: EVENT_VERSION,
+            grant_id,
+            milestone_idx,
+            new_deadline,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_milestone_extension_approved(
+        env: &Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        reviewer: Address,
+        approvals: u32,
+        quorum: u32,
+    ) {
+        let event = MilestoneExtensionApproved {
+            event_version: EVENT_VERSION,
+            grant_id,
+            milestone_idx,
+            reviewer,
+            approvals,
+            quorum,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);

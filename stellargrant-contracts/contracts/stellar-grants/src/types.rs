@@ -170,6 +170,8 @@ pub struct Milestone {
     pub submission_timestamp: u64,
     pub deadline: u64,
     pub community_comments: Map<Address, String>,
+    pub pending_extension_deadline: Option<u64>,
+    pub extension_votes: Map<Address, bool>,
     /// Packed fields (u32 each): idx, approvals, rejections, community_upvotes
     pub packed_stats: u128,
 }
@@ -192,6 +194,8 @@ impl Milestone {
         approvals: u32,
         rejections: u32,
         community_upvotes: u32,
+        pending_extension_deadline: Option<u64>,
+        extension_votes: Map<Address, bool>,
     ) -> Self {
         let mut ms = Self {
             description,
@@ -205,6 +209,8 @@ impl Milestone {
             submission_timestamp,
             deadline,
             community_comments,
+            pending_extension_deadline,
+            extension_votes,
             packed_stats: 0,
         };
         ms.set_idx(idx);
