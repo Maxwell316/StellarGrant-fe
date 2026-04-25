@@ -1,4 +1,4 @@
-import { SorobanContractClient, SorobanGrant } from "./types";
+import { ContributorScore, SorobanContractClient, SorobanGrant } from "./types";
 
 const mockGrants: SorobanGrant[] = [
   {
@@ -42,5 +42,17 @@ export class MockSorobanContractClient implements SorobanContractClient {
 
   async fetchGrantById(id: number): Promise<SorobanGrant | null> {
     return mockGrants.find((grant) => grant.id === id) ?? null;
+  }
+
+  async fetchContributorScore(address: string): Promise<ContributorScore | null> {
+    // Basic mock logic: return a consistent score for known mock addresses
+    const knownAddresses = mockGrants.map((g) => g.recipient);
+    if (!knownAddresses.includes(address)) return null;
+
+    return {
+      address,
+      reputation: 100, // Dummy fixed reputation for mocks
+      totalEarned: "1000000000",
+    };
   }
 }
