@@ -8,7 +8,14 @@ export type SorobanGrant = {
   tags?: string | null;
 };
 
+export type ContributorScore = {
+  address: string;
+  reputation: number;
+  totalEarned: string;
+};
+
 export interface SorobanContractClient {
   fetchGrants(): Promise<SorobanGrant[]>;
   fetchGrantById(id: number): Promise<SorobanGrant | null>;
+  fetchContributorScore(address: string): Promise<ContributorScore | null>;
 }

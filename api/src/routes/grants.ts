@@ -115,21 +115,21 @@ export const buildGrantRouter = (
        * we use OR grouping → matches ANY tag
        */
       if (tagsFilter.length > 0) {
-        qb.andWhere(
-          new (require("typeorm").Brackets)((qb1: any) => {
-            tagsFilter.forEach((tag, idx) => {
-              qb1.orWhere(
-                "LOWER(COALESCE(grant.tags, '')) LIKE :tag" + idx,
-                { ["tag" + idx]: `%${tag}%` },
-              );
-            });
-          }),
-        );
+        tagsFilter.forEach((tag, idx) => {
+          qb.andWhere("LOWER(COALESCE(grant.tags, '')) LIKE :tag" + idx, {
+            ["tag" + idx]: `%${tag}%`,
+          });
+        });
       }
 
       // ---------------- Sorting + Pagination ----------------
-      qb.orderBy(`grant.${sortBy}`, order)
-        .skip((page - 1) * limit)
+      if (sortBy === "totalAmount") {
+        qb.orderBy("CAST(grant.totalAmount AS DECIMAL)", order);
+      } else {
+        qb.orderBy(`grant.${sortBy}`, order);
+      }
+      
+      qb.skip((page - 1) * limit)
         .take(limit);
 
       // ---------------- Execute ----------------
