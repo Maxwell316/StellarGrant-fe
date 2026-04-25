@@ -5,6 +5,7 @@ import { Grant } from "../entities/Grant";
 import { MilestoneProof } from "../entities/MilestoneProof";
 import { Contributor } from "../entities/Contributor";
 import { ReputationLog } from "../entities/ReputationLog";
+import { AuditLog } from "../entities/AuditLog";
 
 export const buildDataSource = (databaseUrl = env.databaseUrl) =>
   new DataSource({
@@ -12,6 +13,6 @@ export const buildDataSource = (databaseUrl = env.databaseUrl) =>
     ...(databaseUrl.startsWith("sqljs")
       ? { location: databaseUrl.replace("sqljs://", ""), autoSave: false }
       : { url: databaseUrl }),
-    entities: [Grant, MilestoneProof, Contributor, ReputationLog],
+    entities: [Grant, MilestoneProof, Contributor, ReputationLog, AuditLog],
     synchronize: true,
   });

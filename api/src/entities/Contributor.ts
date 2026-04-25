@@ -12,6 +12,9 @@ export class Contributor {
   @Column({ type: "int", default: 0 })
   totalGrantsCompleted!: number;
 
+  @Column({ type: "boolean", default: false })
+  isBlacklisted!: boolean;
+
   @UpdateDateColumn()
   updatedAt!: Date;
 }
