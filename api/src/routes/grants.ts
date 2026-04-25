@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { Repository } from "typeorm";
 import { Grant } from "../entities/Grant";
+import { UserWatchlist } from "../entities/UserWatchlist";
 import { GrantSyncService } from "../services/grant-sync-service";
+import { SignatureService } from "../services/signature-service";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Query-param validation helpers
@@ -76,11 +79,20 @@ function localizeGrant(grant: Grant, lang: string) {
 // Router
 // ---------------------------------------------------------------------------
 
+const watchSchema = z.object({
+  address: z.string().min(10).max(120),
+  signature: z.string().min(32),
+  nonce: z.string().min(8).max(80),
+  timestamp: z.number().int().positive(),
+});
+
 export const buildGrantRouter = (
   grantRepo: Repository<Grant>,
   syncService: GrantSyncService,
+  signatureService: SignatureService,
 ) => {
   const router = Router();
+  const watchlistRepo = grantRepo.manager.getRepository(UserWatchlist);
 
   router.get("/", async (req, res, next) => {
     try {
@@ -153,8 +165,24 @@ export const buildGrantRouter = (
       // ---------------- Execute ----------------
       const [data, total] = await qb.getManyAndCount();
 
+      // Add isWatched flag if user address is provided
+      const userAddress = req.header("x-user-address");
+      let watchedGrantIds: Set<number> = new Set();
+      if (userAddress) {
+        const watchlistEntries = await watchlistRepo.find({
+          where: { address: userAddress },
+          select: ["grantId"],
+        });
+        watchedGrantIds = new Set(watchlistEntries.map(e => e.grantId));
+      }
+
+      const responseData = data.map(g => ({
+        ...localizeGrant(g, lang),
+        isWatched: watchedGrantIds.has(g.id),
+      }));
+
       res.json({
-        data: data.map(g => localizeGrant(g, lang)),
+        data: responseData,
         meta: {
           total,
           page,
@@ -186,7 +214,154 @@ export const buildGrantRouter = (
         return;
       }
 
-      res.json({ data: localizeGrant(grant, lang) });
+      const userAddress = req.header("x-user-address");
+      let isWatched = false;
+      if (userAddress) {
+        const watchlistEntry = await watchlistRepo.findOne({
+          where: { address: userAddress, grantId: id },
+        });
+        isWatched = !!watchlistEntry;
+      }
+
+      res.json({ data: { ...localizeGrant(grant, lang), isWatched } });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // ---------------- Watch Grant ----------------
+  router.post("/:id/watch", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) {
+        res.status(400).json({ error: "Invalid grant id" });
+        return;
+      }
+
+      const parsed = watchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid payload", details: parsed.error.issues });
+        return;
+      }
+
+      const { address, signature, nonce, timestamp } = parsed.data;
+      const maxSkewMs = 5 * 60 * 1000;
+      if (Math.abs(Date.now() - timestamp) > maxSkewMs) {
+        res.status(400).json({ error: "Expired intent timestamp" });
+        return;
+      }
+
+      // Verify signature
+      const action = `POST:/grants/${id}/watch`;
+      const message = [
+        "stellargrant:user_action:v1",
+        address,
+        nonce,
+        timestamp,
+        action,
+      ].join("|");
+
+      const { StrKey, Keypair } = await import("@stellar/stellar-sdk");
+      if (!StrKey.isValidEd25519PublicKey(address)) {
+        res.status(400).json({ error: "Invalid Stellar address" });
+        return;
+      }
+
+      const keypair = Keypair.fromPublicKey(address);
+      const isValid = keypair.verify(
+        Buffer.from(message, "utf8"),
+        Buffer.from(signature, "base64"),
+      );
+
+      if (!isValid) {
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+
+      // Check if grant exists
+      const grant = await grantRepo.findOne({ where: { id } });
+      if (!grant) {
+        res.status(404).json({ error: "Grant not found" });
+        return;
+      }
+
+      // Add to watchlist
+      await watchlistRepo.save({
+        address,
+        grantId: id,
+      });
+
+      res.status(201).json({ data: { watched: true } });
+    } catch (error: any) {
+      if (error?.code === "23505" || error?.code === "SQLITE_CONSTRAINT") {
+        res.status(409).json({ error: "Grant already watched" });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  // ---------------- Unwatch Grant ----------------
+  router.delete("/:id/watch", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) {
+        res.status(400).json({ error: "Invalid grant id" });
+        return;
+      }
+
+      const parsed = watchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid payload", details: parsed.error.issues });
+        return;
+      }
+
+      const { address, signature, nonce, timestamp } = parsed.data;
+      const maxSkewMs = 5 * 60 * 1000;
+      if (Math.abs(Date.now() - timestamp) > maxSkewMs) {
+        res.status(400).json({ error: "Expired intent timestamp" });
+        return;
+      }
+
+      // Verify signature
+      const action = `DELETE:/grants/${id}/watch`;
+      const message = [
+        "stellargrant:user_action:v1",
+        address,
+        nonce,
+        timestamp,
+        action,
+      ].join("|");
+
+      const { StrKey, Keypair } = await import("@stellar/stellar-sdk");
+      if (!StrKey.isValidEd25519PublicKey(address)) {
+        res.status(400).json({ error: "Invalid Stellar address" });
+        return;
+      }
+
+      const keypair = Keypair.fromPublicKey(address);
+      const isValid = keypair.verify(
+        Buffer.from(message, "utf8"),
+        Buffer.from(signature, "base64"),
+      );
+
+      if (!isValid) {
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+
+      // Remove from watchlist
+      const result = await watchlistRepo.delete({
+        address,
+        grantId: id,
+      });
+
+      if (result.affected === 0) {
+        res.status(404).json({ error: "Watchlist entry not found" });
+        return;
+      }
+
+      res.json({ data: { watched: false } });
     } catch (error) {
       next(error);
     }

@@ -36,7 +36,7 @@ export const createApp = (dataSource: DataSource, sorobanClient: SorobanContract
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
   app.use(rateLimiter);
-  app.use("/grants", buildGrantRouter(grantRepo, grantSyncService));
+  app.use("/grants", buildGrantRouter(grantRepo, grantSyncService, signatureService));
   app.use("/milestone_proof", buildMilestoneProofRouter(proofRepo, signatureService));
   app.use("/leaderboard", buildLeaderboardRouter(leaderboardService));
   app.use("/admin", adminMiddleware, buildAdminRouter(grantSyncService, contributorRepo, auditLogRepo));
