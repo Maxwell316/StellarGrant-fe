@@ -5,7 +5,7 @@
  * Includes vote data and submission proof.
  */
 
-export function useMilestone( _grantId: string, milestoneIdx: number) {
+export function useMilestone( _grantId: string,  _milestoneIdx: number) {
   // TODO: Implement milestone fetching hook
   return {
     milestone: null,

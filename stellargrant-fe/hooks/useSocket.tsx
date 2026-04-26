@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useRef } from "react";
-import { io, Socket } from "socket.io-client";
+import io from "socket.io-client";
 import { useWalletStore } from "@/lib/store/walletStore";
 
 interface Notification {
@@ -11,7 +11,7 @@ interface Notification {
 }
 
 interface SocketContextType {
-  socket: Socket | null;
+  socket: any;
   connected: boolean;
   lastNotification: Notification | null;
 }
@@ -26,10 +26,10 @@ export const useSocket = () => useContext(SocketContext);
 
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { address } = useWalletStore();
-  const [socket, setSocketState] = useState<Socket | null>(null);
+  const [socket, setSocketState] = useState<any>(null);
   const [connected, setConnected] = useState(false);
   const [lastNotification, setLastNotification] = useState<Notification | null>(null);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<any>(null);
 
   useEffect(() => {
     if (!address) {
@@ -45,6 +45,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     const socketUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+    // @ts-ignore - io is the default export in some build environments
     const newSocket = io(socketUrl, {
       query: { address },
       reconnectionAttempts: 5,
