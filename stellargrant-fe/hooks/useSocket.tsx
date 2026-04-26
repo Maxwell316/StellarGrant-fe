@@ -52,7 +52,6 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const socketUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
     
-    // @ts-expect-error - 'io' can be a default export or a named export depending on the environment
     const newSocket = io(socketUrl, {
       query: { address },
       reconnectionAttempts: 5,
